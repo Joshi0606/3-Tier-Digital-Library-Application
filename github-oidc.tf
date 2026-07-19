@@ -20,11 +20,12 @@
 #   terraform import aws_iam_openid_connect_provider.github \
 #     arn:aws:iam::393323650493:oidc-provider/token.actions.githubusercontent.com
 resource "aws_iam_openid_connect_provider" "github" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
-  # GitHub's OIDC thumbprint — stable, published by GitHub
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1",
-                     "1c58a3a8518e8759bf075b76b750d4f2df264fcd"]
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
+  # AWS now validates GitHub OIDC tokens directly without needing thumbprints.
+  # Providing any valid 40-char hex string satisfies the API requirement.
+  # The actual validation is done by AWS natively for GitHub's OIDC endpoint.
+  thumbprint_list = ["ffffffffffffffffffffffffffffffffffffffff"]
 
   tags = {
     Name = "github-actions-oidc"
@@ -146,7 +147,7 @@ resource "aws_iam_role" "github_actions_cicd" {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
         StringLike = {
-          # Allow both main branch pushes AND pull request checks
+          # Wildcard covers push, pull_request, workflow_dispatch, environment jobs
           "token.actions.githubusercontent.com:sub" = "repo:${local.github_repo}:*"
         }
       }
