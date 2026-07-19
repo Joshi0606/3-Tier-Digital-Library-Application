@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: borrow-deployment
+  namespace: library
+  labels:
+    app: borrow-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: borrow-service          # was missing in old manifest — caused apply failure
+  template:
+    metadata:
+      labels:
+        app: borrow-service
+    spec:
+      serviceAccountName: library-sa
+      containers:
+        - name: borrow-service
+          image: 393323650493.dkr.ecr.us-east-1.amazonaws.com/digital-library-borrow:latest
+          ports:
+            - containerPort: 5003
+          envFrom:
+            - configMapRef:
+                name: library-config
+          livenessProbe:
+            httpGet:
+              path: /borrow/health
+              port: 5003
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /borrow/health
+              port: 5003
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: borrow-service
+  namespace: library
+spec:
+  type: ClusterIP
+  selector:
+    app: borrow-service
+  ports:
+    - port: 5003
+      targetPort: 5003

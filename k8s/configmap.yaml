@@ -1,0 +1,14 @@
+# configmap.yaml
+# The ONLY env vars injected into pods.
+# Everything else (DB host, DB name, DB user, SQS URL, SNS ARN, S3 bucket)
+# is fetched at startup from SSM Parameter Store via IRSA.
+# DB password is fetched from Secrets Manager (ARN stored in SSM).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: library-config
+  namespace: library
+data:
+  # SSM path prefix — secrets.py fetches all params under this path
+  AWS_SSM_PATH: "/digital-library/prod/config"
+  AWS_REGION: "us-east-1"

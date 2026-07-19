@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: library
+  labels:
+    app: digital-library
+    environment: prod

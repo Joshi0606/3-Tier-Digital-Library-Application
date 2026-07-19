@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: book-deployment
+  namespace: library
+  labels:
+    app: book-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: book-service
+  template:
+    metadata:
+      labels:
+        app: book-service
+    spec:
+      serviceAccountName: library-sa
+      containers:
+        - name: book-service
+          image: 393323650493.dkr.ecr.us-east-1.amazonaws.com/digital-library-book:latest
+          ports:
+            - containerPort: 5002
+          envFrom:
+            - configMapRef:
+                name: library-config
+          livenessProbe:
+            httpGet:
+              path: /books/health
+              port: 5002
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /books/health
+              port: 5002
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: book-service
+  namespace: library
+spec:
+  type: ClusterIP
+  selector:
+    app: book-service
+  ports:
+    - port: 5002
+      targetPort: 5002

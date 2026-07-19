@@ -1,0 +1,61 @@
+# ingress.yaml
+# The ALB Controller reads this and CREATES a new internet-facing ALB.
+# Do NOT set load-balancer-arn — let the controller create and manage it.
+# After applying, get the ALB DNS with:
+#   kubectl get ingress -n library
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: library-ingress
+  namespace: library
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    # Attach the SG that allows port 80 from the internet
+    # Value from: terraform output alb_security_group_id
+    alb.ingress.kubernetes.io/security-groups: "sg-02591f5bac92ce376"
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+spec:
+  rules:
+    - http:
+        paths:
+          # Auth service — must come before / catch-all
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: auth-service
+                port:
+                  number: 5001
+
+          # Book service
+          - path: /books
+            pathType: Prefix
+            backend:
+              service:
+                name: book-service
+                port:
+                  number: 5002
+
+          # Borrow service
+          - path: /borrow
+            pathType: Prefix
+            backend:
+              service:
+                name: borrow-service
+                port:
+                  number: 5003
+
+          # Frontend — catch-all, must be last
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-service
+                port:
+                  number: 80

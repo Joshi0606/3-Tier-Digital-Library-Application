@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-deployment
+  namespace: library
+  labels:
+    app: auth-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+    spec:
+      serviceAccountName: library-sa
+      containers:
+        - name: auth-service
+          image: 393323650493.dkr.ecr.us-east-1.amazonaws.com/digital-library-auth:latest
+          ports:
+            - containerPort: 5001
+          envFrom:
+            - configMapRef:
+                name: library-config
+          livenessProbe:
+            httpGet:
+              path: /auth/health
+              port: 5001
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /auth/health
+              port: 5001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: library
+spec:
+  type: ClusterIP
+  selector:
+    app: auth-service
+  ports:
+    - port: 5001
+      targetPort: 5001

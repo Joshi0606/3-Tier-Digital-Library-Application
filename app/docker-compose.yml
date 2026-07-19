@@ -1,0 +1,120 @@
+# ============================================================
+# docker-compose.yml  –  Local development & testing
+#
+# Spins up the full stack locally:
+#   mysql    → local MySQL (replaces RDS for testing)
+#   auth     → auth service on port 5001
+#   book     → book service on port 5002
+#   borrow   → borrow service on port 5003
+#   frontend → React/Nginx on port 3000
+#
+# Usage:
+#   docker compose up --build        # build all images and start
+#   docker compose up --build -d     # run in background
+#   docker compose logs -f auth      # tail a specific service
+#   docker compose down -v           # stop and remove volumes
+# ============================================================
+
+services:
+
+  # ── MySQL (local stand-in for RDS) ─────────────────────────
+  # Uses the official MySQL 8.0 image.
+  # Runs the init SQL on first start to create tables.
+  mysql:
+    image: mysql:8.0
+    container_name: library-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: digital_library
+      MYSQL_USER: appuser
+      MYSQL_PASSWORD: apppassword
+    ports:
+      - "3306:3306"           # expose so you can connect via MySQL Workbench
+    volumes:
+      - mysql_data:/var/lib/mysql                    # persist data between restarts
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql  # auto-run on first start
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s    # give MySQL time to initialise before checking
+
+  # ── Auth Service ────────────────────────────────────────────
+  auth:
+    build:
+      context: ./auth       # folder containing Dockerfile + auth_service.py
+      dockerfile: Dockerfile
+    container_name: library-auth
+    environment:
+      DB_HOST: mysql        # docker service name — resolves via Docker DNS
+      DB_USER: appuser
+      DB_PASSWORD: apppassword
+      DB_NAME: digital_library
+      DB_PORT: "3306"
+    ports:
+      - "5001:5001"
+    depends_on:
+      mysql:
+        condition: service_healthy   # wait for MySQL to be ready before starting
+    restart: on-failure
+
+  # ── Book Service ─────────────────────────────────────────────
+  book:
+    build:
+      context: ./book
+      dockerfile: Dockerfile
+    container_name: library-book
+    environment:
+      DB_HOST: mysql
+      DB_USER: appuser
+      DB_PASSWORD: apppassword
+      DB_NAME: digital_library
+      DB_PORT: "3306"
+    ports:
+      - "5002:5002"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: on-failure
+
+  # ── Borrow Service ───────────────────────────────────────────
+  borrow:
+    build:
+      context: ./borrow
+      dockerfile: Dockerfile
+    container_name: library-borrow
+    environment:
+      DB_HOST: mysql
+      DB_USER: appuser
+      DB_PASSWORD: apppassword
+      DB_NAME: digital_library
+      DB_PORT: "3306"
+    ports:
+      - "5003:5003"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: on-failure
+
+  # ── Frontend ─────────────────────────────────────────────────
+  # Nginx serves the React build and proxies API calls.
+  # ALB_DNS_PLACEHOLDER is replaced at runtime via entrypoint.
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost  # local: calls go through Nginx proxy
+    container_name: library-frontend
+    ports:
+      - "3000:80"            # visit http://localhost:3000 in browser
+    depends_on:
+      - auth
+      - book
+      - borrow
+    restart: on-failure
+
+# ── Named volume for MySQL data ──────────────────────────────
+volumes:
+  mysql_data:
