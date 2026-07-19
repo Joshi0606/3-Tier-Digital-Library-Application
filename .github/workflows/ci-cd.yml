@@ -1,15 +1,14 @@
 # ============================================================
 # ci-cd.yml  —  Pipeline 2: Build → ECR → Deploy to EKS
 #
-# Auth: GitHub OIDC — no stored AWS keys anywhere.
+# Auth: AWS Access Keys (OIDC has Node 24 compatibility issues)
 #
-# Required GitHub Variables (repo Settings → Variables):
-#   AWS_ROLE_ARN_CICD → terraform output github_actions_cicd_role_arn
+# Required GitHub Secrets:
+#   AWS_ACCESS_KEY_ID
+#   AWS_SECRET_ACCESS_KEY
 #
-# Optional GitHub Secrets:
-#   TEAMS_WEBHOOK_URL  → Teams notifications (skip if not using Teams)
-#
-# No AWS access keys needed.
+# Optional GitHub Variables:
+#   TEAMS_WEBHOOK_URL  → Teams notifications
 # ============================================================
 
 name: CI/CD — Build & Deploy
@@ -25,7 +24,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write   # required for OIDC token request
   contents: read
 
 env:
@@ -40,7 +38,6 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -65,9 +62,6 @@ jobs:
     name: Build & Push — ${{ matrix.service }}
     runs-on: ubuntu-latest
     needs: test
-    permissions:
-      id-token: write
-      contents: read
 
     strategy:
       fail-fast: false
@@ -98,12 +92,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials via OIDC
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4.1.0
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN_CICD }}
-          aws-region:     ${{ env.AWS_REGION }}
-          role-duration-seconds: 3600
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
@@ -137,20 +131,17 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-push
     environment: production
-    permissions:
-      id-token: write
-      contents: read
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials via OIDC
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4.1.0
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN_CICD }}
-          aws-region:     ${{ env.AWS_REGION }}
-          role-duration-seconds: 3600
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
 
       - name: Update kubeconfig
         run: |
@@ -180,19 +171,15 @@ jobs:
           kubectl set image deployment/auth-deployment \
             auth-service=${{ env.ECR_REGISTRY }}/digital-library-auth:${{ github.sha }} \
             -n ${{ env.K8S_NAMESPACE }}
-
           kubectl set image deployment/book-deployment \
             book-service=${{ env.ECR_REGISTRY }}/digital-library-book:${{ github.sha }} \
             -n ${{ env.K8S_NAMESPACE }}
-
           kubectl set image deployment/borrow-deployment \
             borrow-service=${{ env.ECR_REGISTRY }}/digital-library-borrow:${{ github.sha }} \
             -n ${{ env.K8S_NAMESPACE }}
-
           kubectl set image deployment/frontend-deployment \
             frontend=${{ env.ECR_REGISTRY }}/digital-library-frontend:${{ github.sha }} \
             -n ${{ env.K8S_NAMESPACE }}
-
           kubectl set image deployment/worker-deployment \
             worker=${{ env.ECR_REGISTRY }}/digital-library-worker:${{ github.sha }} \
             -n ${{ env.K8S_NAMESPACE }}
@@ -239,41 +226,3 @@ jobs:
             --subject "❌ Deployment FAILED — Digital Library" \
             --message "Commit: ${{ github.sha }} — Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             --region ${{ env.AWS_REGION }}
-
-      - name: Notify Teams — success
-        if: success() && vars.TEAMS_WEBHOOK_URL != ''
-        continue-on-error: true
-        run: |
-          curl -sf -H "Content-Type: application/json" \
-            -d '{
-              "@type": "MessageCard",
-              "themeColor": "00c853",
-              "summary": "Deployment Successful",
-              "sections": [{
-                "activityTitle": "✅ Deployment Successful — Digital Library",
-                "facts": [
-                  {"name": "Cluster", "value": "${{ env.EKS_CLUSTER }}"},
-                  {"name": "Commit",  "value": "${{ github.sha }}"},
-                  {"name": "Author",  "value": "${{ github.actor }}"}
-                ]
-              }]
-            }' "${{ vars.TEAMS_WEBHOOK_URL }}"
-
-      - name: Notify Teams — failed
-        if: failure() && vars.TEAMS_WEBHOOK_URL != ''
-        continue-on-error: true
-        run: |
-          curl -sf -H "Content-Type: application/json" \
-            -d '{
-              "@type": "MessageCard",
-              "themeColor": "d32f2f",
-              "summary": "Deployment Failed",
-              "sections": [{
-                "activityTitle": "❌ Deployment FAILED — Digital Library",
-                "facts": [
-                  {"name": "Cluster", "value": "${{ env.EKS_CLUSTER }}"},
-                  {"name": "Commit",  "value": "${{ github.sha }}"},
-                  {"name": "Author",  "value": "${{ github.actor }}"}
-                ]
-              }]
-            }' "${{ vars.TEAMS_WEBHOOK_URL }}"
