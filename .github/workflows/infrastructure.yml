@@ -55,6 +55,10 @@ jobs:
     name: Terraform Plan
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' || github.event.inputs.action == 'plan'
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
 
     steps:
       - name: Checkout
@@ -132,8 +136,11 @@ jobs:
   apply:
     name: Terraform Apply
     runs-on: ubuntu-latest
-    environment: production   # manual approval gate in GitHub Environments
+    environment: production
     if: github.event_name == 'push' || github.event.inputs.action == 'apply'
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout
