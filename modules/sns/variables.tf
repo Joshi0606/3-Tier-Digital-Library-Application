@@ -7,6 +7,6 @@ variable "environment" {
 }
 
 variable "alert_email" {
-  description = "Email address to receive infrastructure alerts"
-  type        = string
+  description = "List of email addresses to receive infrastructure alerts"
+  type        = list(string)
 }

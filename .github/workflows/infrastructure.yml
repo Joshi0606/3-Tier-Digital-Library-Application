@@ -49,6 +49,8 @@ env:
   TF_VERSION:  "1.10.0"
   AWS_REGION:  "us-east-1"
   EKS_CLUSTER: "digital-library-prod-eks"
+  TF_VAR_assets_bucket_suffix: "digitallib-jul2026"
+  TF_VAR_alert_email: '["shyamjoshi@kalaga.com","syamjoshik@gmail.com"]'
 
 jobs:
   # ── Plan: runs on PRs ──────────────────────────────────────

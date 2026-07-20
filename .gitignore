@@ -1,6 +1,8 @@
 # Terraform state and sensitive files — never commit these
 terraform.tfvars
 github-oidc.tf
+aws-auth-backup.yaml
+*-backup.yaml
 *.tfstate
 *.tfstate.*
 *.tfstate.backup

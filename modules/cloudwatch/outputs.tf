@@ -16,3 +16,8 @@ output "alarm_arns" {
     sqs_dlq_depth   = aws_cloudwatch_metric_alarm.sqs_dlq_depth.arn
   }
 }
+
+output "dashboard_url" {
+  description = "CloudWatch dashboard URL"
+  value       = "https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=${aws_cloudwatch_dashboard.main.dashboard_name}"
+}

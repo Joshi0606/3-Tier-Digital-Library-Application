@@ -12,7 +12,7 @@ variable "project_name" {
 variable "environment" {
   description = "Environment name, e.g. 'prod' or 'dev'"
   type        = string
-  default     = "production"
+  default     = "prod"
 }
 
 # --- passed to modules/vpc/ ---
@@ -48,8 +48,8 @@ variable "assets_bucket_suffix" {
 
 # --- passed to modules/sns/ ---
 variable "alert_email" {
-  description = "Email address to receive infrastructure alerts - set in terraform.tfvars, deliberately no default since it's personal data"
-  type        = string
+  description = "List of email addresses to receive infrastructure alerts - set in terraform.tfvars, deliberately no default since it's personal data"
+  type        = list(string)
 }
 
 # --- passed to modules/rds/ ---

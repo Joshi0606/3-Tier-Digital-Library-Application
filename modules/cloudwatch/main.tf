@@ -117,3 +117,119 @@ resource "aws_cloudwatch_metric_alarm" "sqs_dlq_depth" {
   alarm_actions      = [var.sns_topic_arn]
   ok_actions         = [var.sns_topic_arn]
 }
+
+# ---------------------------------------------------------------------------
+# 6. CLOUDWATCH DASHBOARD - single pane of glass for the whole project.
+#    Shows node CPU, RDS CPU, SQS queue depth, alarm status, and live
+#    application logs all in one place.
+# ---------------------------------------------------------------------------
+resource "aws_cloudwatch_dashboard" "main" {
+  dashboard_name = "${var.project_name}-${var.environment}"
+
+  dashboard_body = jsonencode({
+    widgets = [
+      {
+        type   = "metric"
+        x      = 0
+        y      = 0
+        width  = 12
+        height = 6
+        properties = {
+          title   = "EKS Node CPU Utilization"
+          view    = "timeSeries"
+          stacked = false
+          metrics = [
+            ["AWS/EC2", "CPUUtilization", "AutoScalingGroupName", var.node_group_asg_name, { stat = "Average", period = 300, color = "#2196F3" }]
+          ]
+          yAxis = { left = { min = 0, max = 100 } }
+          annotations = {
+            horizontal = [{ value = var.ec2_cpu_threshold, color = "#ff6961", label = "Alarm threshold" }]
+          }
+          region = "us-east-1"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 12
+        y      = 0
+        width  = 12
+        height = 6
+        properties = {
+          title   = "RDS CPU Utilization"
+          view    = "timeSeries"
+          stacked = false
+          metrics = [
+            ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", var.db_instance_id, { stat = "Average", period = 300, color = "#FF9800" }]
+          ]
+          yAxis = { left = { min = 0, max = 100 } }
+          annotations = {
+            horizontal = [{ value = var.rds_cpu_threshold, color = "#ff6961", label = "Alarm threshold" }]
+          }
+          region = "us-east-1"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 6
+        width  = 12
+        height = 6
+        properties = {
+          title   = "SQS Queue Depth"
+          view    = "timeSeries"
+          stacked = false
+          metrics = [
+            ["AWS/SQS", "ApproximateNumberOfMessages", "QueueName", "${var.project_name}-${var.environment}-orders-queue", { stat = "Maximum", period = 60, color = "#4CAF50", label = "Orders Queue" }],
+            ["AWS/SQS", "ApproximateNumberOfMessages", "QueueName", var.orders_dlq_name, { stat = "Maximum", period = 60, color = "#f44336", label = "Dead Letter Queue" }]
+          ]
+          region = "us-east-1"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 12
+        y      = 6
+        width  = 12
+        height = 6
+        properties = {
+          title   = "RDS Free Storage"
+          view    = "timeSeries"
+          stacked = false
+          metrics = [
+            ["AWS/RDS", "FreeStorageSpace", "DBInstanceIdentifier", var.db_instance_id, { stat = "Average", period = 300, color = "#9C27B0" }]
+          ]
+          region = "us-east-1"
+        }
+      },
+      {
+        type   = "alarm"
+        x      = 0
+        y      = 12
+        width  = 24
+        height = 4
+        properties = {
+          title  = "Alarm Status"
+          alarms = [
+            aws_cloudwatch_metric_alarm.eks_node_cpu.arn,
+            aws_cloudwatch_metric_alarm.rds_cpu.arn,
+            aws_cloudwatch_metric_alarm.rds_storage_low.arn,
+            aws_cloudwatch_metric_alarm.sqs_dlq_depth.arn
+          ]
+        }
+      },
+      {
+        type   = "log"
+        x      = 0
+        y      = 16
+        width  = 24
+        height = 6
+        properties = {
+          title   = "Application Logs (last 20 min)"
+          query   = "SOURCE '/${var.project_name}/${var.environment}/auth' | SOURCE '/${var.project_name}/${var.environment}/book' | SOURCE '/${var.project_name}/${var.environment}/borrow' | SOURCE '/${var.project_name}/${var.environment}/worker' | fields @timestamp, @message | sort @timestamp desc | limit 100"
+          region  = "us-east-1"
+          view    = "table"
+        }
+      }
+    ]
+  })
+}

@@ -23,7 +23,9 @@ resource "aws_sns_topic" "alerts" {
 #    no way to automate that click; it's a one-time manual step after apply.
 # ---------------------------------------------------------------------------
 resource "aws_sns_topic_subscription" "email" {
+  for_each  = toset(var.alert_email)
+
   topic_arn = aws_sns_topic.alerts.arn
   protocol  = "email"
-  endpoint  = var.alert_email
+  endpoint  = each.value
 }

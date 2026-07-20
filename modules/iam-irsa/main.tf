@@ -92,6 +92,13 @@ resource "aws_iam_policy" "app_pod" {
         ]
         # Scoped to this project/environment path only — not all SSM params in the account
         Resource = "arn:aws:ssm:us-east-1:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/${var.environment}/*"
+      },
+      {
+        Sid    = "SNSPublishAccess"
+        Effect = "Allow"
+        Action = "sns:Publish"
+        # Scoped to only this project's alerts topic
+        Resource = "arn:aws:sns:us-east-1:${data.aws_caller_identity.current.account_id}:${var.project_name}-${var.environment}-alerts"
       }
     ]
   })
