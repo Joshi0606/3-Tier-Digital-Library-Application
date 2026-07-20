@@ -1,16 +1,3 @@
-# ============================================================
-# ci-cd.yml  —  Pipeline 2: Build → ECR → Deploy to EKS
-#
-# Auth: AWS Access Keys (OIDC has Node 24 compatibility issues)
-#
-# Required GitHub Secrets:
-#   AWS_ACCESS_KEY_ID
-#   AWS_SECRET_ACCESS_KEY
-#
-# Optional GitHub Variables:
-#   TEAMS_WEBHOOK_URL  → Teams notifications
-# ============================================================
-
 name: CI/CD — Build & Deploy
 
 on:
@@ -27,14 +14,13 @@ permissions:
   contents: read
 
 env:
-  AWS_REGION:    "us-east-1"
-  ECR_REGISTRY:  "393323650493.dkr.ecr.us-east-1.amazonaws.com"
-  EKS_CLUSTER:   "digital-library-prod-eks"
-  K8S_NAMESPACE: "library"
-  SNS_TOPIC_ARN: "arn:aws:sns:us-east-1:393323650493:digital-library-prod-alerts"
+  AWS_REGION:    ${{ secrets.AWS_REGION }}
+  ECR_REGISTRY:  ${{ secrets.ECR_REGISTRY }}
+  EKS_CLUSTER:   ${{ secrets.EKS_CLUSTER }}
+  K8S_NAMESPACE: ${{ secrets.K8S_NAMESPACE }}
+  SNS_TOPIC_ARN: ${{ secrets.SNS_TOPIC_ARN }}
 
 jobs:
-  # ── Job 1: Test ────────────────────────────────────────────
   test:
     name: Run Tests
     runs-on: ubuntu-latest
@@ -57,7 +43,6 @@ jobs:
       - name: Run tests
         run: echo "Add pytest commands here when tests exist"
 
-  # ── Job 2: Build and Push to ECR ──────────────────────────
   build-push:
     name: Build & Push — ${{ matrix.service }}
     runs-on: ubuntu-latest
@@ -97,7 +82,7 @@ jobs:
         with:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:            ${{ env.AWS_REGION }}
+          aws-region:            ${{ secrets.AWS_REGION }}
 
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
@@ -111,21 +96,20 @@ jobs:
           context: ${{ matrix.context }}
           push: true
           tags: |
-            ${{ env.ECR_REGISTRY }}/${{ matrix.image }}:latest
-            ${{ env.ECR_REGISTRY }}/${{ matrix.image }}:${{ github.sha }}
-          cache-from: type=registry,ref=${{ env.ECR_REGISTRY }}/${{ matrix.image }}:cache
-          cache-to:   type=registry,ref=${{ env.ECR_REGISTRY }}/${{ matrix.image }}:cache,mode=max
+            ${{ secrets.ECR_REGISTRY }}/${{ matrix.image }}:latest
+            ${{ secrets.ECR_REGISTRY }}/${{ matrix.image }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ secrets.ECR_REGISTRY }}/${{ matrix.image }}:cache
+          cache-to:   type=registry,ref=${{ secrets.ECR_REGISTRY }}/${{ matrix.image }}:cache,mode=max
 
       - name: Trivy vulnerability scan — ${{ matrix.service }}
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref:      ${{ env.ECR_REGISTRY }}/${{ matrix.image }}:${{ github.sha }}
+          image-ref:      ${{ secrets.ECR_REGISTRY }}/${{ matrix.image }}:${{ github.sha }}
           format:         table
           exit-code:      "0"
           ignore-unfixed: true
           severity:       CRITICAL,HIGH
 
-  # ── Job 3: Deploy to EKS ──────────────────────────────────
   deploy:
     name: Deploy to EKS
     runs-on: ubuntu-latest
@@ -141,13 +125,13 @@ jobs:
         with:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:            ${{ env.AWS_REGION }}
+          aws-region:            ${{ secrets.AWS_REGION }}
 
       - name: Update kubeconfig
         run: |
           aws eks update-kubeconfig \
-            --region ${{ env.AWS_REGION }} \
-            --name ${{ env.EKS_CLUSTER }}
+            --region ${{ secrets.AWS_REGION }} \
+            --name ${{ secrets.EKS_CLUSTER }}
 
       - name: Apply base manifests
         run: |
@@ -169,33 +153,33 @@ jobs:
       - name: Pin image tags to git SHA
         run: |
           kubectl set image deployment/auth-deployment \
-            auth-service=${{ env.ECR_REGISTRY }}/digital-library-auth:${{ github.sha }} \
-            -n ${{ env.K8S_NAMESPACE }}
+            auth-service=${{ secrets.ECR_REGISTRY }}/digital-library-auth:${{ github.sha }} \
+            -n ${{ secrets.K8S_NAMESPACE }}
           kubectl set image deployment/book-deployment \
-            book-service=${{ env.ECR_REGISTRY }}/digital-library-book:${{ github.sha }} \
-            -n ${{ env.K8S_NAMESPACE }}
+            book-service=${{ secrets.ECR_REGISTRY }}/digital-library-book:${{ github.sha }} \
+            -n ${{ secrets.K8S_NAMESPACE }}
           kubectl set image deployment/borrow-deployment \
-            borrow-service=${{ env.ECR_REGISTRY }}/digital-library-borrow:${{ github.sha }} \
-            -n ${{ env.K8S_NAMESPACE }}
+            borrow-service=${{ secrets.ECR_REGISTRY }}/digital-library-borrow:${{ github.sha }} \
+            -n ${{ secrets.K8S_NAMESPACE }}
           kubectl set image deployment/frontend-deployment \
-            frontend=${{ env.ECR_REGISTRY }}/digital-library-frontend:${{ github.sha }} \
-            -n ${{ env.K8S_NAMESPACE }}
+            frontend=${{ secrets.ECR_REGISTRY }}/digital-library-frontend:${{ github.sha }} \
+            -n ${{ secrets.K8S_NAMESPACE }}
           kubectl set image deployment/worker-deployment \
-            worker=${{ env.ECR_REGISTRY }}/digital-library-worker:${{ github.sha }} \
-            -n ${{ env.K8S_NAMESPACE }}
+            worker=${{ secrets.ECR_REGISTRY }}/digital-library-worker:${{ github.sha }} \
+            -n ${{ secrets.K8S_NAMESPACE }}
 
       - name: Wait for rollout
         run: |
           for dep in auth-deployment book-deployment borrow-deployment frontend-deployment worker-deployment; do
             echo "Waiting for $dep..."
             kubectl rollout status deployment/$dep \
-              -n ${{ env.K8S_NAMESPACE }} --timeout=180s
+              -n ${{ secrets.K8S_NAMESPACE }} --timeout=180s
           done
 
       - name: Smoke test health endpoints
         run: |
           ALB_DNS=$(kubectl get ingress library-ingress \
-            -n ${{ env.K8S_NAMESPACE }} \
+            -n ${{ secrets.K8S_NAMESPACE }} \
             -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
           echo "ALB DNS: $ALB_DNS"
           for i in 1 2 3 4 5; do
@@ -212,17 +196,17 @@ jobs:
         continue-on-error: true
         run: |
           aws sns publish \
-            --topic-arn "${{ env.SNS_TOPIC_ARN }}" \
+            --topic-arn "${{ secrets.SNS_TOPIC_ARN }}" \
             --subject "✅ Deployment Successful — Digital Library" \
             --message "Commit: ${{ github.sha }} by ${{ github.actor }}" \
-            --region ${{ env.AWS_REGION }}
+            --region ${{ secrets.AWS_REGION }}
 
       - name: Notify SNS — failed
         if: failure()
         continue-on-error: true
         run: |
           aws sns publish \
-            --topic-arn "${{ env.SNS_TOPIC_ARN }}" \
+            --topic-arn "${{ secrets.SNS_TOPIC_ARN }}" \
             --subject "❌ Deployment FAILED — Digital Library" \
             --message "Commit: ${{ github.sha }} — Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            --region ${{ env.AWS_REGION }}
+            --region ${{ secrets.AWS_REGION }}
