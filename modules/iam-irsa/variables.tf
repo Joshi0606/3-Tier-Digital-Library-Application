@@ -22,13 +22,13 @@ variable "oidc_provider_url" {
 variable "app_namespace" {
   description = "Kubernetes namespace the app service accounts live in"
   type        = string
-  default     = "default"
+  default     = "library"
 }
 
 variable "app_service_account_name" {
   description = "Name of the app's Kubernetes service account - must match exactly what's used in each service's Deployment manifest"
   type        = string
-  default     = "digital-library-app"
+  default     = "library-sa"
 }
 
 # --- cloudwatch agent service account identity ---

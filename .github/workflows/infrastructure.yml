@@ -1,13 +1,16 @@
 # ============================================================
 # infrastructure.yml  —  Pipeline 1: Terraform Infrastructure
 #
-# Auth: GitHub OIDC — no stored AWS keys anywhere.
-# AWS issues temporary credentials per job run via OIDC trust.
+# Auth: AWS Access Keys (OIDC has Node 24 compatibility issues)
 #
-# Required GitHub Variables (repo Settings → Variables):
-#   AWS_ROLE_ARN_INFRA → terraform output github_actions_infra_role_arn
+# Required GitHub Secrets:
+#   AWS_ACCESS_KEY_ID
+#   AWS_SECRET_ACCESS_KEY
 #
-# No secrets needed.
+# Jobs:
+#   plan  → on PR or manual plan trigger
+#   apply → on push to main (*.tf files) or manual apply trigger
+#           also installs ALB Controller via Helm after apply
 # ============================================================
 
 name: Infrastructure — Terraform
@@ -38,9 +41,7 @@ on:
           - plan
           - apply
 
-# OIDC requires these permissions on the job
 permissions:
-  id-token: write   # allows GitHub to request OIDC token
   contents: read
   pull-requests: write
 
@@ -55,22 +56,17 @@ jobs:
     name: Terraform Plan
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' || github.event.inputs.action == 'plan'
-    permissions:
-      id-token: write
-      contents: read
-      pull-requests: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials via OIDC
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4.1.0
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN_INFRA }}
-          aws-region:     ${{ env.AWS_REGION }}
-          # Token is valid for 1 hour — enough for any Terraform plan
-          role-duration-seconds: 3600
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
 
       - name: Setup Terraform ${{ env.TF_VERSION }}
         uses: hashicorp/setup-terraform@v3
@@ -138,20 +134,17 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     if: github.event_name == 'push' || github.event.inputs.action == 'apply'
-    permissions:
-      id-token: write
-      contents: read
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials via OIDC
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4.1.0
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN_INFRA }}
-          aws-region:     ${{ env.AWS_REGION }}
-          role-duration-seconds: 3600
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
 
       - name: Setup Terraform ${{ env.TF_VERSION }}
         uses: hashicorp/setup-terraform@v3

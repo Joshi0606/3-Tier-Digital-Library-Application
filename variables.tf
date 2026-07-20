@@ -12,7 +12,7 @@ variable "project_name" {
 variable "environment" {
   description = "Environment name, e.g. 'prod' or 'dev'"
   type        = string
-  default     = "prod"
+  default     = "production"
 }
 
 # --- passed to modules/vpc/ ---
@@ -57,9 +57,4 @@ variable "db_multi_az" {
   description = "Whether RDS runs a standby replica in a second AZ (costs 2x) - false for this project, kept as a variable so it's easy to toggle"
   type        = bool
   default     = false
-}
-
-variable "github_repo" {
-  description = "GitHub repository in owner/repo format — used to scope OIDC trust to this repo only"
-  type        = string
 }

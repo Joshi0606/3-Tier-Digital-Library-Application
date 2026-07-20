@@ -1,5 +1,6 @@
 # Terraform state and sensitive files — never commit these
 terraform.tfvars
+github-oidc.tf
 *.tfstate
 *.tfstate.*
 *.tfstate.backup
