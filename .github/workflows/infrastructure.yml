@@ -35,7 +35,7 @@ env:
   AWS_REGION:                  ${{ secrets.AWS_REGION }}
   EKS_CLUSTER:                 ${{ secrets.EKS_CLUSTER }}
   TF_VAR_assets_bucket_suffix: ${{ secrets.TF_VAR_ASSETS_BUCKET_SUFFIX }}
-  TF_VAR_alert_email:          ${{ secrets.TF_VAR_ALERT_EMAIL }}
+  TF_VAR_alert_email:          '["shyamjoshi@kalaga.com","syamjoshik@gmail.com"]'
 
 jobs:
   plan:
