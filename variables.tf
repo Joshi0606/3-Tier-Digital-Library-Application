@@ -48,8 +48,9 @@ variable "assets_bucket_suffix" {
 
 # --- passed to modules/sns/ ---
 variable "alert_email" {
-  description = "List of email addresses to receive infrastructure alerts - set in terraform.tfvars, deliberately no default since it's personal data"
+  description = "List of email addresses to receive infrastructure alerts"
   type        = list(string)
+  default     = ["shyamjoshi@kalaga.com", "syamjoshik@gmail.com"]
 }
 
 # --- passed to modules/rds/ ---
