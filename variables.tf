@@ -65,3 +65,16 @@ variable "ci_cd_principal_arn" {
   type        = string
   default     = ""
 }
+
+# --- passed to modules/sonarqube/ ---
+variable "ec2_key_pair_name" {
+  description = "EC2 key pair name for SSH access to SonarQube instance"
+  type        = string
+  default     = "terraform-key"
+}
+
+variable "sonarqube_instance_type" {
+  description = "EC2 instance type for SonarQube server"
+  type        = string
+  default     = "t3.micro"
+}

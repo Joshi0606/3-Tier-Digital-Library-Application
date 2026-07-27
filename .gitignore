@@ -10,6 +10,12 @@ aws-auth-backup.yaml
 .terraform.lock.hcl
 tfplan
 
+# SSH / TLS private keys — never commit
+*.pem
+*.key
+*_rsa
+*_ed25519
+
 # Terraform crash logs
 crash.log
 crash.*.log

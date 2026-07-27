@@ -75,3 +75,19 @@ output "cloudwatch_agent_role_arn" {
   description = "IAM Role ARN to annotate on the CloudWatch agent ServiceAccount"
   value       = module.iam_irsa.cloudwatch_agent_role_arn
 }
+
+# --- SonarQube - needed for CI/CD code scanning ---
+output "sonarqube_url" {
+  description = "SonarQube URL for CI/CD pipeline configuration"
+  value       = module.sonarqube.sonarqube_url
+}
+
+output "sonarqube_public_ip" {
+  description = "Public IP address of SonarQube EC2 instance"
+  value       = module.sonarqube.sonarqube_public_ip
+}
+
+output "sonarqube_instance_id" {
+  description = "EC2 instance ID of SonarQube server"
+  value       = module.sonarqube.sonarqube_instance_id
+}

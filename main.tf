@@ -99,6 +99,19 @@ module "rds" {
   db_multi_az = var.db_multi_az
 }
 
+module "sonarqube" {
+  source = "./modules/sonarqube"
+
+  project_name     = var.project_name
+  environment      = var.environment
+  vpc_id           = module.vpc.vpc_id
+  subnet_id        = module.vpc.public_subnet_ids[0]
+  key_name         = var.ec2_key_pair_name
+  instance_type    = var.sonarqube_instance_type
+  volume_size      = 50
+  ssh_allowed_cidr = ["0.0.0.0/0"]
+}
+
 
 # TIER 3 - depends on EKS's OIDC provider (tier 2)
 
