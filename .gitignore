@@ -26,6 +26,9 @@ __pycache__/
 *.pyo
 .env
 
+# Local dev
+app/docker-compose.yml
+
 # Node
 node_modules/
 dist/

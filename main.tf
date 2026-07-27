@@ -3,9 +3,9 @@
 # Terraform's actual build order (it resolves that from module.xxx.output
 # references), but it's grouped here by dependency tier for readability.
 
-# ---------------------------------------------------------------------------
+
 # TIER 1 - no dependencies on other modules
-# ---------------------------------------------------------------------------
+
 
 module "vpc" {
   source = "./modules/vpc"
@@ -62,9 +62,9 @@ module "secrets" {
   environment  = var.environment
 }
 
-# ---------------------------------------------------------------------------
+
 # TIER 2 - depends on VPC and/or IAM (tier 1)
-# ---------------------------------------------------------------------------
+
 
 module "eks" {
   source = "./modules/eks"
@@ -96,9 +96,8 @@ module "rds" {
   db_multi_az = var.db_multi_az
 }
 
-# ---------------------------------------------------------------------------
+
 # TIER 3 - depends on EKS's OIDC provider (tier 2)
-# ---------------------------------------------------------------------------
 
 module "alb_controller" {
   source = "./modules/alb-controller"
@@ -130,9 +129,7 @@ module "iam_irsa" {
   rds_master_user_secret_arn = module.rds.db_master_user_secret_arn
 }
 
-# ---------------------------------------------------------------------------
 # TIER 4 - depends on ECR (for ssm), and on EKS+RDS+SQS+SNS (for cloudwatch)
-# ---------------------------------------------------------------------------
 
 module "ssm" {
   source = "./modules/ssm"

@@ -20,6 +20,8 @@ resource "aws_eks_cluster" "main" {
     # you'd set this false and use a VPN/bastion instead.
     endpoint_public_access  = true
     endpoint_private_access = true
+    # For production hardening: restrict public_access_cidrs to your office/VPN IP
+    # public_access_cidrs = ["YOUR_IP/32"]
   }
 
   tags = {
