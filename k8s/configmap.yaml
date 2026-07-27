@@ -3,6 +3,7 @@
 # Everything else (DB host, DB name, DB user, SQS URL, SNS ARN, S3 bucket)
 # is fetched at startup from SSM Parameter Store via IRSA.
 # DB password is fetched from Secrets Manager (ARN stored in SSM).
+# Trigger CI/CD pipeline - 2026-07-27
 apiVersion: v1
 kind: ConfigMap
 metadata:
