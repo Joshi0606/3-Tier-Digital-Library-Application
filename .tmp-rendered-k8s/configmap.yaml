@@ -7,7 +7,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: library-config
-  namespace: ${K8S_NAMESPACE}
+  namespace: library
 data:
   # SSM path prefix — secrets.py fetches all params under this path
   AWS_SSM_PATH: "/digital-library/prod/config"

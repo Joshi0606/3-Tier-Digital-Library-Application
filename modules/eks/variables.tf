@@ -67,3 +67,9 @@ variable "oidc_thumbprint_list" {
   type        = list(string)
   default     = []
 }
+
+variable "ci_cd_principal_arn" {
+  description = "ARN of the IAM user or role used by CI/CD (GitHub Actions) to deploy to the cluster. Gets AmazonEKSClusterAdminPolicy via an EKS Access Entry. Set to empty string to skip."
+  type        = string
+  default     = ""
+}

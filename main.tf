@@ -81,6 +81,9 @@ module "eks" {
   # --- from modules/iam/ ---
   eks_cluster_role_arn = module.iam.eks_cluster_role_arn
   eks_node_role_arn    = module.iam.eks_node_role_arn
+
+  # --- CI/CD cluster access (GitHub Actions IAM user) ---
+  ci_cd_principal_arn = var.ci_cd_principal_arn
 }
 
 module "rds" {

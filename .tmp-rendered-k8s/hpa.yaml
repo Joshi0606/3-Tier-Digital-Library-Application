@@ -8,7 +8,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: auth-hpa
-  namespace: ${K8S_NAMESPACE}
+  namespace: library
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -28,7 +28,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: book-hpa
-  namespace: ${K8S_NAMESPACE}
+  namespace: library
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -48,7 +48,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: borrow-hpa
-  namespace: ${K8S_NAMESPACE}
+  namespace: library
 spec:
   scaleTargetRef:
     apiVersion: apps/v1

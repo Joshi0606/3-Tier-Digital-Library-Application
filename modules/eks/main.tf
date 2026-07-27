@@ -24,6 +24,15 @@ resource "aws_eks_cluster" "main" {
     # public_access_cidrs = ["YOUR_IP/32"]
   }
 
+  # API mode enables EKS Access Entries (the modern, Terraform-native way to
+  # grant IAM principals access to the cluster) instead of the legacy
+  # aws-auth ConfigMap. API_AND_CONFIG_MAP keeps backward compatibility
+  # if any existing aws-auth entries exist.
+  access_config {
+    authentication_mode                         = "API_AND_CONFIG_MAP"
+    bootstrap_cluster_creator_admin_permissions = true
+  }
+
   tags = {
     Name = "${var.project_name}-${var.environment}-eks"
   }
@@ -107,4 +116,39 @@ resource "aws_eks_node_group" "main" {
   }
 
   depends_on = [aws_eks_cluster.main]
+}
+
+# ---------------------------------------------------------------------------
+# 4. CI/CD ACCESS ENTRY - grants the GitHub Actions IAM user (or role)
+#    cluster-admin rights so kubectl can apply manifests.
+#
+#    This replaces the legacy aws-auth ConfigMap approach. EKS Access Entries
+#    are managed entirely via the AWS API — no in-cluster ConfigMap edits.
+# ---------------------------------------------------------------------------
+resource "aws_eks_access_entry" "ci_cd" {
+  count         = var.ci_cd_principal_arn != "" ? 1 : 0
+
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = var.ci_cd_principal_arn
+
+  # STANDARD type = regular IAM user or role (not a node/Fargate profile)
+  type = "STANDARD"
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-cicd-access-entry"
+  }
+}
+
+resource "aws_eks_access_policy_association" "ci_cd_admin" {
+  count         = var.ci_cd_principal_arn != "" ? 1 : 0
+
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = var.ci_cd_principal_arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.ci_cd]
 }

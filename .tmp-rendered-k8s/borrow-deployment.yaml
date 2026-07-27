@@ -1,39 +1,39 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: book-deployment
-  namespace: ${K8S_NAMESPACE}
+  name: borrow-deployment
+  namespace: library
   labels:
-    app: book-service
+    app: borrow-service
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: book-service
+      app: borrow-service          # was missing in old manifest — caused apply failure
   template:
     metadata:
       labels:
-        app: book-service
+        app: borrow-service
     spec:
       serviceAccountName: library-sa
       containers:
-        - name: book-service
-          image: 393323650493.dkr.ecr.us-east-1.amazonaws.com/digital-library-book:latest
+        - name: borrow-service
+          image: 393323650493.dkr.ecr.us-east-1.amazonaws.com/digital-library-borrow:latest
           ports:
-            - containerPort: 5002
+            - containerPort: 5003
           envFrom:
             - configMapRef:
                 name: library-config
           livenessProbe:
             httpGet:
-              path: /books/health
-              port: 5002
+              path: /borrow/health
+              port: 5003
             initialDelaySeconds: 15
             periodSeconds: 20
           readinessProbe:
             httpGet:
-              path: /books/health
-              port: 5002
+              path: /borrow/health
+              port: 5003
             initialDelaySeconds: 10
             periodSeconds: 10
           resources:
@@ -47,12 +47,12 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: book-service
-  namespace: ${K8S_NAMESPACE}
+  name: borrow-service
+  namespace: library
 spec:
   type: ClusterIP
   selector:
-    app: book-service
+    app: borrow-service
   ports:
-    - port: 5002
-      targetPort: 5002
+    - port: 5003
+      targetPort: 5003

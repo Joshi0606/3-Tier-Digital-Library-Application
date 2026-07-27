@@ -14,11 +14,12 @@ permissions:
   contents: read
 
 env:
-  AWS_REGION:    ${{ secrets.AWS_REGION }}
-  ECR_REGISTRY:  ${{ secrets.ECR_REGISTRY }}
-  EKS_CLUSTER:   ${{ secrets.EKS_CLUSTER }}
-  K8S_NAMESPACE: ${{ secrets.K8S_NAMESPACE }}
-  SNS_TOPIC_ARN: ${{ secrets.SNS_TOPIC_ARN }}
+  AWS_REGION:            ${{ secrets.AWS_REGION }}
+  ECR_REGISTRY:          ${{ secrets.ECR_REGISTRY }}
+  EKS_CLUSTER:           ${{ secrets.EKS_CLUSTER }}
+  K8S_NAMESPACE:         ${{ secrets.K8S_NAMESPACE || 'library' }}
+  SNS_TOPIC_ARN:         ${{ secrets.SNS_TOPIC_ARN }}
+  ALB_SECURITY_GROUP_ID: sg-02591f5bac92ce376
 
 jobs:
   test:
@@ -28,17 +29,49 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: SonarQube scan
+        if: ${{ secrets.SONAR_HOST_URL != '' && secrets.SONAR_TOKEN != '' }}
+        uses: SonarSource/sonarqube-scan-action@v2.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          projectBaseDir: .
+          args: >
+            -Dproject.settings=sonar-project.properties
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/frontend/package-lock.json
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install frontend dependencies
+        run: |
+          npm install --prefix app/frontend
+
+      - name: Build frontend
+        run: |
+          npm run build --prefix app/frontend
+
+      - name: Install Python dependencies
         run: |
           pip install -r app/auth/requirements.txt
           pip install -r app/book/requirements.txt
           pip install -r app/borrow/requirements.txt
           pip install -r app/worker/requirements.txt
+
+      - name: Validate Python syntax
+        run: |
+          python -m compileall app/auth app/book app/borrow app/worker
 
       - name: Run tests
         run: echo "Add pytest commands here when tests exist"
@@ -133,22 +166,74 @@ jobs:
             --region ${{ secrets.AWS_REGION }} \
             --name ${{ secrets.EKS_CLUSTER }}
 
+      - name: Pre-flight cluster validation
+        run: |
+          echo "Checking EKS API access..."
+          kubectl cluster-info
+          echo "Checking auth permissions..."
+          kubectl auth can-i '*' '*' --all-namespaces
+          echo "Checking namespace target..."
+          kubectl get namespace ${{ env.K8S_NAMESPACE }} || kubectl create namespace ${{ env.K8S_NAMESPACE }}
+
+      - name: Render manifests with runtime values
+        run: |
+          mkdir -p /tmp/rendered-k8s
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          root = Path('k8s')
+          out_dir = Path('/tmp/rendered-k8s')
+          out_dir.mkdir(exist_ok=True)
+
+          aws_account_id = os.popen("aws sts get-caller-identity --query Account --output text").read().strip()
+          namespace = os.environ.get('K8S_NAMESPACE', 'library')
+          replacements = {
+              "${APP_POD_ROLE_ARN}": f"arn:aws:iam::{aws_account_id}:role/digital-library-prod-app-pod-role",
+              "${CLOUDWATCH_AGENT_ROLE_ARN}": f"arn:aws:iam::{aws_account_id}:role/digital-library-prod-cloudwatch-agent-role",
+              "${ALB_SECURITY_GROUP_ID}": os.environ.get('ALB_SECURITY_GROUP_ID', 'sg-02591f5bac92ce376'),
+              "${K8S_NAMESPACE}": namespace,
+          }
+
+          for rel_path in [
+              "namespace.yaml",
+              "serviceaccount.yaml",
+              "configmap.yaml",
+              "auth-deployment.yaml",
+              "book-deployment.yaml",
+              "borrow-deployment.yaml",
+              "frontend-deployment.yaml",
+              "worker-deployment.yaml",
+              "ingress.yaml",
+              "hpa.yaml",
+              "cloudwatch-daemonset-observability.yaml",
+          ]:
+              source = root / rel_path
+              target = out_dir / rel_path
+              text = source.read_text(encoding='utf-8')
+              for old, new in replacements.items():
+                  text = text.replace(old, new)
+              text = text.replace('namespace: library', f'namespace: {namespace}')
+              text = text.replace('name: library', f'name: {namespace}')
+              target.write_text(text, encoding='utf-8')
+          PY
+
       - name: Apply base manifests
         run: |
-          kubectl apply -f k8s/namespace.yaml
-          kubectl apply -f k8s/serviceaccount.yaml
-          kubectl apply -f k8s/configmap.yaml
-          kubectl apply -f k8s/cloudwatch-daemonset-observability.yaml
+          kubectl apply -f /tmp/rendered-k8s/namespace.yaml
+          kubectl apply -f /tmp/rendered-k8s/serviceaccount.yaml
+          kubectl apply -f /tmp/rendered-k8s/configmap.yaml
+          kubectl apply -f /tmp/rendered-k8s/cloudwatch-daemonset-observability.yaml
 
       - name: Apply service manifests
         run: |
-          kubectl apply -f k8s/auth-deployment.yaml
-          kubectl apply -f k8s/book-deployment.yaml
-          kubectl apply -f k8s/borrow-deployment.yaml
-          kubectl apply -f k8s/frontend-deployment.yaml
-          kubectl apply -f k8s/worker-deployment.yaml
-          kubectl apply -f k8s/ingress.yaml
-          kubectl apply -f k8s/hpa.yaml
+          kubectl apply -f /tmp/rendered-k8s/auth-deployment.yaml
+          kubectl apply -f /tmp/rendered-k8s/book-deployment.yaml
+          kubectl apply -f /tmp/rendered-k8s/borrow-deployment.yaml
+          kubectl apply -f /tmp/rendered-k8s/frontend-deployment.yaml
+          kubectl apply -f /tmp/rendered-k8s/worker-deployment.yaml
+          kubectl apply -f /tmp/rendered-k8s/ingress.yaml
+          kubectl apply -f /tmp/rendered-k8s/hpa.yaml
 
       - name: Pin image tags to git SHA
         run: |

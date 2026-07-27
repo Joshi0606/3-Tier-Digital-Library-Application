@@ -59,3 +59,9 @@ variable "db_multi_az" {
   type        = bool
   default     = false
 }
+
+variable "ci_cd_principal_arn" {
+  description = "ARN of the IAM user or role that GitHub Actions uses to deploy (AWS_ACCESS_KEY_ID owner). Gets EKS cluster-admin rights via an Access Entry. Find it with: aws iam get-user --query 'User.Arn'"
+  type        = string
+  default     = ""
+}

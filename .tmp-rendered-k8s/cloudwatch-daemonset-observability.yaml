@@ -20,7 +20,7 @@ metadata:
   namespace: amazon-cloudwatch
   annotations:
     # The workflow renders this at deploy time from the current AWS account.
-    eks.amazonaws.com/role-arn: "${CLOUDWATCH_AGENT_ROLE_ARN}"
+    eks.amazonaws.com/role-arn: "arn:aws:iam::000000000000:role/digital-library-prod-cloudwatch-agent-role"
 
 ---
 # ── ConfigMap: CloudWatch Agent ─────────────────────────────

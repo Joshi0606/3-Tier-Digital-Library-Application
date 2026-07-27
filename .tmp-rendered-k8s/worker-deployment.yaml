@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: worker-deployment
-  namespace: ${K8S_NAMESPACE}
+  namespace: library
   labels:
     app: worker
 spec:

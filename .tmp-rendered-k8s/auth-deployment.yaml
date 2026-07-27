@@ -1,39 +1,39 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: book-deployment
-  namespace: ${K8S_NAMESPACE}
+  name: auth-deployment
+  namespace: library
   labels:
-    app: book-service
+    app: auth-service
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: book-service
+      app: auth-service
   template:
     metadata:
       labels:
-        app: book-service
+        app: auth-service
     spec:
       serviceAccountName: library-sa
       containers:
-        - name: book-service
-          image: 393323650493.dkr.ecr.us-east-1.amazonaws.com/digital-library-book:latest
+        - name: auth-service
+          image: 393323650493.dkr.ecr.us-east-1.amazonaws.com/digital-library-auth:latest
           ports:
-            - containerPort: 5002
+            - containerPort: 5001
           envFrom:
             - configMapRef:
                 name: library-config
           livenessProbe:
             httpGet:
-              path: /books/health
-              port: 5002
+              path: /auth/health
+              port: 5001
             initialDelaySeconds: 15
             periodSeconds: 20
           readinessProbe:
             httpGet:
-              path: /books/health
-              port: 5002
+              path: /auth/health
+              port: 5001
             initialDelaySeconds: 10
             periodSeconds: 10
           resources:
@@ -47,12 +47,12 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: book-service
-  namespace: ${K8S_NAMESPACE}
+  name: auth-service
+  namespace: library
 spec:
   type: ClusterIP
   selector:
-    app: book-service
+    app: auth-service
   ports:
-    - port: 5002
-      targetPort: 5002
+    - port: 5001
+      targetPort: 5001
