@@ -61,6 +61,11 @@ resource "aws_instance" "sonarqube" {
     Name = "${var.project_name}-sonarqube"
   }
 
+  lifecycle {
+    prevent_destroy = true   # prevents terraform apply from destroying this instance
+    ignore_changes  = [ami, user_data]  # ignores AMI updates so no accidental replacement
+  }
+
   depends_on = [aws_security_group.sonarqube]
 }
 
