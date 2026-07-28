@@ -102,6 +102,9 @@ jobs:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         with:
           projectBaseDir: .
+          # Scanner 6.x is the last version compatible with SonarQube 9.9 LTS.
+          # Scanner 7.x requires SonarQube 10+ (uses /api/v2 endpoints).
+          scannerVersion: 6.2.1.4610
           args: >
             -Dproject.settings=sonar-project.properties
 
