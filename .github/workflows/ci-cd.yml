@@ -342,6 +342,109 @@ jobs:
           target: "http://${{ steps.smoke.outputs.alb_dns }}"
           cmd_options: "-I"
 
+      # Upload ZAP reports to S3 for audit trail — one report per commit SHA.
+      # report-latest.html is always overwritten for a stable bookmark URL.
+      - name: Upload ZAP report to S3
+        if: always()
+        continue-on-error: true
+        run: |
+          BUCKET="digital-library-assets-digitallib-519111080498"
+          REPORT_KEY="zap-reports/report-${{ github.sha }}.html"
+          aws s3 cp report_html.html s3://$BUCKET/$REPORT_KEY --content-type text/html || true
+          aws s3 cp report_html.html s3://$BUCKET/zap-reports/report-latest.html --content-type text/html || true
+          echo "ZAP HTML report stored at s3://$BUCKET/$REPORT_KEY"
+
+      # Parse ZAP JSON report and email a risk summary via SNS to Gmail.
+      # Subject shows ⚠️ if High findings exist, ✅ if clean.
+      - name: Email ZAP findings via SNS
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 - <<'PY'
+          import json, subprocess, os, sys
+
+          try:
+              with open("report_json.json") as f:
+                  report = json.load(f)
+          except Exception as e:
+              print(f"No ZAP report found: {e}")
+              sys.exit(0)
+
+          alerts = []
+          for site in report.get("site", []):
+              alerts.extend(site.get("alerts", []))
+
+          high   = [a for a in alerts if int(a.get("riskcode", 0)) == 3]
+          medium = [a for a in alerts if int(a.get("riskcode", 0)) == 2]
+          low    = [a for a in alerts if int(a.get("riskcode", 0)) == 1]
+          info   = [a for a in alerts if int(a.get("riskcode", 0)) == 0]
+
+          sha        = os.environ.get("GITHUB_SHA", "unknown")[:12]
+          server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+          repo       = os.environ.get("GITHUB_REPOSITORY", "")
+          run_id     = os.environ.get("GITHUB_RUN_ID", "")
+          region     = os.environ.get("AWS_REGION", "us-east-1")
+          topic_arn  = os.environ.get("SNS_TOPIC_ARN", "")
+          bucket     = "digital-library-assets-digitallib-519111080498"
+
+          lines = [
+              "OWASP ZAP Baseline Scan — Digital Library",
+              f"Commit : {sha}",
+              f"Run    : {server_url}/{repo}/actions/runs/{run_id}",
+              f"Report : https://{bucket}.s3.amazonaws.com/zap-reports/report-latest.html",
+              "",
+              "Risk Summary",
+              f"  High   : {len(high)}",
+              f"  Medium : {len(medium)}",
+              f"  Low    : {len(low)}",
+              f"  Info   : {len(info)}",
+              f"  Total  : {len(alerts)}",
+              "",
+          ]
+
+          if high:
+              lines.append("HIGH RISK FINDINGS (action required):")
+              for a in high:
+                  lines.append(f"  [{a.get('riskdesc','High')}] {a.get('name')} — {a.get('count',1)} instance(s)")
+                  lines.append(f"    Solution: {a.get('solution','See ZAP report')[:120]}")
+              lines.append("")
+
+          if medium:
+              lines.append("MEDIUM RISK FINDINGS:")
+              for a in medium:
+                  lines.append(f"  [{a.get('riskdesc','Medium')}] {a.get('name')} — {a.get('count',1)} instance(s)")
+              lines.append("")
+
+          if low:
+              lines.append("LOW RISK FINDINGS:")
+              for a in low:
+                  lines.append(f"  [{a.get('riskdesc','Low')}] {a.get('name')} — {a.get('count',1)} instance(s)")
+              lines.append("")
+
+          lines.append("Full HTML report available in GitHub Actions artifacts and S3.")
+
+          message = "\n".join(lines)
+          icon    = "⚠️ ACTION REQUIRED" if high else ("⚠️ Review Needed" if medium else "✅ Clean")
+          subject = f"{icon} — ZAP Scan: {len(high)} High, {len(medium)} Medium, {len(low)} Low [{sha}]"
+
+          if not topic_arn:
+              print("SNS_TOPIC_ARN not set, skipping email")
+              sys.exit(0)
+
+          result = subprocess.run([
+              "aws", "sns", "publish",
+              "--topic-arn", topic_arn,
+              "--subject", subject[:100],
+              "--message", message,
+              "--region", region
+          ], capture_output=True, text=True)
+
+          if result.returncode == 0:
+              print(f"ZAP summary emailed: {subject}")
+          else:
+              print(f"SNS publish failed: {result.stderr}")
+          PY
+
       - name: Notify SNS — success
         if: success()
         continue-on-error: true
