@@ -96,7 +96,7 @@ jobs:
       # React JSX imports and Python module resolution.
       - name: SonarQube scan
         if: ${{ env.SONAR_HOST_URL != '' && env.SONAR_TOKEN != '' }}
-        uses: SonarSource/sonarqube-scan-action@v5
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN:    ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
