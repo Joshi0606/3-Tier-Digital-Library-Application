@@ -96,7 +96,7 @@ jobs:
       # React JSX imports and Python module resolution.
       - name: SonarQube scan
         if: ${{ env.SONAR_HOST_URL != '' && env.SONAR_TOKEN != '' }}
-        uses: SonarSource/sonarqube-scan-action@v6
+        uses: SonarSource/sonarqube-scan-action@v5
         env:
           SONAR_TOKEN:    ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
@@ -105,13 +105,14 @@ jobs:
           args: >
             -Dproject.settings=sonar-project.properties
 
-      # Polls SonarQube for the quality gate result using report-task.txt
-      # written by the scan step above. Fails the job if gate is not passed,
-      # which prevents build-push and deploy from running.
+      # Polls SonarQube for the quality gate result.
+      # Uses sonar.qualitygate.wait=false so the scanner doesn't block.
+      # This action polls separately with its own timeout — more resilient
+      # on slower EC2 connections.
       - name: SonarQube quality gate check
         if: ${{ env.SONAR_HOST_URL != '' && env.SONAR_TOKEN != '' }}
         uses: SonarSource/sonarqube-quality-gate-action@v1.1.0
-        timeout-minutes: 5
+        timeout-minutes: 10
         env:
           SONAR_TOKEN:    ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
