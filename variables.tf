@@ -61,20 +61,20 @@ variable "db_multi_az" {
 }
 
 variable "ci_cd_principal_arn" {
-  description = "ARN of the IAM user or role that GitHub Actions uses to deploy (AWS_ACCESS_KEY_ID owner). Gets EKS cluster-admin rights via an Access Entry. Find it with: aws iam get-user --query 'User.Arn'"
+  description = "ARN of the IAM user or role that GitHub Actions uses to deploy (AWS_ACCESS_KEY_ID owner). Gets EKS cluster-admin rights via an Access Entry."
   type        = string
-  default     = ""
+  default     = "arn:aws:iam::519111080498:user/joshi"
 }
 
 # --- passed to modules/sonarqube/ ---
 variable "ec2_key_pair_name" {
   description = "EC2 key pair name for SSH access to SonarQube instance"
   type        = string
-  default     = "terraform-key"
+  default     = "digital-library-key"
 }
 
 variable "sonarqube_instance_type" {
   description = "EC2 instance type for SonarQube server"
   type        = string
-  default     = "t3.micro"
+  default     = "t3.small"
 }
