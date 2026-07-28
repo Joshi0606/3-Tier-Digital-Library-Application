@@ -1,24 +1,6 @@
-"""
-worker.py — SQS Message Worker
-
-This service runs as a separate pod in EKS alongside the Flask services.
-It continuously polls the SQS queue and processes messages based on event_type.
-
-Three event types handled:
-  1. borrow_confirmation → sends confirmation email via SNS
-  2. new_book_added      → notifies all subscribers via SNS
-  3. bulk_book_import    → inserts a single book into RDS
-
-Why a separate worker instead of processing inside Flask?
-  - Flask handles HTTP requests — it should respond fast
-  - Email sending, DB inserts, and retries happen here, not in the API
-  - If the worker crashes, SQS keeps messages safe until it restarts
-  - DLQ catches messages that fail 3 times for investigation
-"""
-
 import json
 import logging
-import os
+import sys
 import time
 
 import boto3
@@ -31,17 +13,19 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 
-# Load all config from SSM at startup — blocks until fetched
 _cfg          = load_config()
 REGION        = _cfg["AWS_REGION"]
 SQS_QUEUE_URL = _cfg["SQS_QUEUE_URL"]
 SNS_TOPIC_ARN = _cfg["SNS_TOPIC_ARN"]
 
+KNOWN_EVENT_TYPES = {"borrow_confirmation", "new_book_added", "bulk_book_import"}
+
 sqs = boto3.client("sqs", region_name=REGION)
 sns = boto3.client("sns", region_name=REGION)
 
 
-# ── Database connection ───────────────────────────────────────
+# Database
+
 def get_db():
     return mysql.connector.connect(
         host=_cfg["DB_HOST"],
@@ -51,18 +35,12 @@ def get_db():
     )
 
 
-# ── Event handlers ────────────────────────────────────────────
+# Event handlers
 
 def handle_borrow_confirmation(data: dict):
-    """
-    Sends a borrow confirmation email to the user via SNS.
-    SNS delivers it to the user's email subscription.
-    If the user has no SNS subscription, the message is published
-    to the ops topic — extend this to use SES for per-user emails.
-    """
-    user_name  = data.get("user_name",  "User")
-    user_email = data.get("user_email", "")
-    book_title = data.get("book_title", "")
+    user_name   = data.get("user_name",  "User")
+    user_email  = data.get("user_email", "")
+    book_title  = data.get("book_title", "")
     book_author = data.get("book_author", "")
 
     message = (
@@ -79,14 +57,10 @@ def handle_borrow_confirmation(data: dict):
         Subject=f"Borrow Confirmed: {book_title}",
         Message=message
     )
-    logging.info(f"Borrow confirmation sent for user {user_email} — book: {book_title}")
+    logging.info(f"Borrow confirmation sent — user: {user_email}, book: {book_title}")
 
 
 def handle_new_book_added(data: dict):
-    """
-    Notifies all SNS subscribers that a new book was added.
-    Everyone subscribed to the topic receives this email.
-    """
     book_title  = data.get("book_title",  "")
     book_author = data.get("book_author", "")
 
@@ -106,13 +80,6 @@ def handle_new_book_added(data: dict):
 
 
 def handle_bulk_book_import(data: dict):
-    """
-    Inserts a single book into the RDS database.
-    Each CSV row arrives as a separate SQS message so:
-      - Large imports don't time out the API
-      - Failed rows go to DLQ for investigation
-      - DB is never hammered with bulk inserts
-    """
     title  = data.get("book_title",  "").strip()
     author = data.get("book_author", "").strip()
 
@@ -127,82 +94,87 @@ def handle_bulk_book_import(data: dict):
         (title, author)
     )
     conn.commit()
-    cursor.close(); conn.close()
+    cursor.close()
+    conn.close()
     logging.info(f"Bulk import — inserted: {title} by {author}")
 
 
-# ── Message dispatcher ────────────────────────────────────────
+# Message dispatcher
 
 def process_message(message: dict):
-    """
-    Routes each SQS message to the correct handler based on event_type.
-    Unrecognised event types are logged and skipped (not retried).
-    """
     event_type = message.get("event_type")
+
+    if event_type not in KNOWN_EVENT_TYPES:
+        # Unknown event types are raised so SQS retries and eventually routes
+        # to DLQ — silent skipping would hide producer-side bugs.
+        raise ValueError(f"Unknown event_type: '{event_type}' — routing to DLQ after max retries")
 
     if event_type == "borrow_confirmation":
         handle_borrow_confirmation(message)
-
     elif event_type == "new_book_added":
         handle_new_book_added(message)
-
     elif event_type == "bulk_book_import":
         handle_bulk_book_import(message)
 
-    else:
-        logging.warning(f"Unknown event_type: {event_type} — skipping")
 
-
-# ── Main polling loop ─────────────────────────────────────────
+# Main polling loop
 
 def run():
-    """
-    Polls SQS continuously.
-    Long polling (WaitTimeSeconds=20) reduces empty API calls and cost.
-    Each message is deleted only after successful processing.
-    If processing raises an exception, the message is NOT deleted —
-    SQS makes it visible again after visibility_timeout and retries it.
-    After 3 failures it moves to the Dead Letter Queue (DLQ).
-    """
-    logging.info(f"Worker started. Polling queue: {SQS_QUEUE_URL}")
+    logging.info(f"Worker started. Polling: {SQS_QUEUE_URL}")
 
     while True:
         try:
             response = sqs.receive_message(
-                QueueUrl            = SQS_QUEUE_URL,
-                MaxNumberOfMessages = 10,     # process up to 10 at once
-                WaitTimeSeconds     = 20,     # long poll — waits 20s for messages
-                VisibilityTimeout   = 60      # worker has 60s to process each message
+                QueueUrl               = SQS_QUEUE_URL,
+                MaxNumberOfMessages    = 10,
+                WaitTimeSeconds        = 20,   # long polling — reduces empty API calls
+                VisibilityTimeout      = 60,
+                AttributeNames         = ["ApproximateReceiveCount"],
+                MessageAttributeNames  = ["All"],
             )
 
             messages = response.get("Messages", [])
 
             if not messages:
-                logging.debug("No messages — waiting...")
                 continue
 
             for msg in messages:
-                receipt_handle = msg["ReceiptHandle"]
+                receipt_handle   = msg["ReceiptHandle"]
+                receive_count    = int(msg.get("Attributes", {}).get("ApproximateReceiveCount", 0))
+                message_id       = msg["MessageId"]
+
                 try:
                     body = json.loads(msg["Body"])
-                    logging.info(f"Processing: {body.get('event_type')} — id: {msg['MessageId']}")
+                    logging.info(
+                        f"Processing: {body.get('event_type')} — "
+                        f"id: {message_id} — attempt: {receive_count}"
+                    )
 
                     process_message(body)
 
-                    # Delete message only after successful processing
-                    sqs.delete_message(
-                        QueueUrl      = SQS_QUEUE_URL,
-                        ReceiptHandle = receipt_handle
-                    )
-                    logging.info(f"Message processed and deleted: {msg['MessageId']}")
+                    sqs.delete_message(QueueUrl=SQS_QUEUE_URL, ReceiptHandle=receipt_handle)
+                    logging.info(f"Deleted: {message_id}")
+
+                except (KeyboardInterrupt, SystemExit):
+                    # Never catch shutdown signals in the inner loop — re-raise immediately
+                    raise
 
                 except Exception as e:
-                    # Don't delete — SQS will retry after visibility timeout
-                    logging.error(f"Failed to process message {msg['MessageId']}: {e}")
+                    # Message is NOT deleted — SQS will make it visible again after
+                    # VisibilityTimeout and retry. After maxReceiveCount failures
+                    # it moves to the DLQ and triggers the CloudWatch alarm.
+                    logging.error(
+                        f"Failed to process {message_id} "
+                        f"(attempt {receive_count}): {e}"
+                    )
+
+        except (KeyboardInterrupt, SystemExit):
+            logging.info("Worker shutting down.")
+            sys.exit(0)
 
         except ClientError as e:
             logging.error(f"SQS receive error: {e}")
-            time.sleep(5)   # brief pause before retrying on AWS errors
+            time.sleep(5)
 
         except Exception as e:
             logging.error(f"Unexpected worker error: {e}")

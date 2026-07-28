@@ -32,14 +32,17 @@ def get_db():
 def send_to_sqs(message: dict):
     queue_url = _cfg.get("SQS_QUEUE_URL")
     if not queue_url:
-        logging.info("SQS_QUEUE_URL not set — skipping SQS publish (local dev mode)")
+        logging.info("SQS_QUEUE_URL not set — skipping (local dev mode)")
         return
     try:
         sqs = boto3.client("sqs", region_name=_cfg["AWS_REGION"])
         sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps(message))
         logging.info(f"SQS message sent: {message.get('event_type')}")
     except ClientError as e:
-        logging.error(f"SQS publish failed (non-critical): {e}")
+        logging.error(
+            f"SQS publish failed — event_type: {message.get('event_type')}, "
+            f"error: {e}. The DB write succeeded but the async notification will not be delivered."
+        )
 
 
 # ==========================

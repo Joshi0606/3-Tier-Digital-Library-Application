@@ -1,32 +1,26 @@
-# 1. DEAD LETTER QUEUE (DLQ)
+# SQS Dead Letter Queue
+
 resource "aws_sqs_queue" "orders_dlq" {
-  name = "${var.project_name}-${var.environment}-orders-dlq"
-
+  name                      = "${var.project_name}-${var.environment}-orders-dlq"
   message_retention_seconds = var.message_retention_seconds
-
-  # Explicit SSE-SQS encryption at rest — AWS encrypts by default since 2023
-  # but being explicit here makes it auditable and consistent with our other
-  # encrypted resources (RDS, S3).
-  sqs_managed_sse_enabled = true
+  sqs_managed_sse_enabled   = true
 
   tags = {
     Name = "${var.project_name}-${var.environment}-orders-dlq"
   }
 }
 
-# 2. MAIN ORDERS QUEUE
-resource "aws_sqs_queue" "orders" {
-  name = "${var.project_name}-${var.environment}-orders-queue"
+# SQS Main Queue
 
+resource "aws_sqs_queue" "orders" {
+  name                       = "${var.project_name}-${var.environment}-orders-queue"
   visibility_timeout_seconds = var.visibility_timeout_seconds
   message_retention_seconds  = var.message_retention_seconds
-
-  # Explicit SSE-SQS encryption at rest
-  sqs_managed_sse_enabled = true
+  sqs_managed_sse_enabled    = true
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.orders_dlq.arn
-    maxReceiveCount      = var.max_receive_count
+    maxReceiveCount     = var.max_receive_count
   })
 
   tags = {
@@ -34,7 +28,8 @@ resource "aws_sqs_queue" "orders" {
   }
 }
 
-# 3. REDRIVE ALLOW POLICY (on the DLQ)
+# DLQ Redrive Allow Policy
+
 resource "aws_sqs_queue_redrive_allow_policy" "orders_dlq" {
   queue_url = aws_sqs_queue.orders_dlq.id
 
@@ -43,4 +38,3 @@ resource "aws_sqs_queue_redrive_allow_policy" "orders_dlq" {
     sourceQueueArns   = [aws_sqs_queue.orders.arn]
   })
 }
-
