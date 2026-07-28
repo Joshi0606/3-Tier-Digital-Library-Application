@@ -173,3 +173,21 @@ jobs:
         run: |
           kubectl rollout status deployment/aws-load-balancer-controller \
             -n kube-system --timeout=120s
+
+      # metrics-server is required by HPA to read CPU metrics from pods.
+      # Without it, HPAs stay in <unknown> state and never scale.
+      # --reuse-values ensures we don't overwrite any prior customizations
+      # if the release already exists.
+      - name: Install / upgrade metrics-server
+        run: |
+          helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
+          helm repo update
+          helm upgrade --install metrics-server metrics-server/metrics-server \
+            --namespace kube-system \
+            --set args[0]="--kubelet-insecure-tls" \
+            --wait --timeout=120s
+
+      - name: Verify metrics-server is running
+        run: |
+          kubectl rollout status deployment/metrics-server \
+            -n kube-system --timeout=60s

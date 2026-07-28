@@ -19,7 +19,9 @@ env:
   EKS_CLUSTER:           ${{ secrets.EKS_CLUSTER }}
   K8S_NAMESPACE:         ${{ secrets.K8S_NAMESPACE || 'library' }}
   SNS_TOPIC_ARN:         ${{ secrets.SNS_TOPIC_ARN }}
-  ALB_SECURITY_GROUP_ID: sg-02591f5bac92ce376
+  # ALB SG ID is account-specific — get from: terraform output alb_security_group_id
+  # Store in GitHub secret ALB_SECURITY_GROUP_ID after terraform apply
+  ALB_SECURITY_GROUP_ID: ${{ secrets.ALB_SECURITY_GROUP_ID }}
 
 jobs:
   test:
@@ -32,7 +34,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0        # required for SonarQube git blame & new code detection
+          fetch-depth: 0        # required for SonarQube git blame & Gitleaks full history scan
+
+      # ── Secret Scanning — Gitleaks ────────────────────────────────────────
+      # Scans the full git history for accidentally committed secrets
+      # (API keys, passwords, tokens). Runs before everything else so
+      # secrets are caught before any code is built or pushed.
+      # exit-code 1 = secrets found → job fails, pipeline stops.
+      - name: Gitleaks — secret scanning
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -58,6 +70,27 @@ jobs:
           pip install -r app/book/requirements.txt
           pip install -r app/borrow/requirements.txt
           pip install -r app/worker/requirements.txt
+
+      # ── SCA — pip-audit (Python dependency vulnerability scan) ────────────
+      # Scans requirements.txt files directly against the OSV vulnerability
+      # database. This is different from Trivy which scans the built Docker
+      # image — pip-audit catches vulnerable packages before the image is
+      # even built, giving earlier feedback.
+      # --fix is NOT used — we report only, don't auto-modify requirements.
+      # continue-on-error: true keeps the pipeline running so you can see
+      # all issues at once; remove this to make it blocking.
+      - name: pip-audit — Python SCA
+        run: |
+          pip install pip-audit
+          echo "=== auth/requirements.txt ==="
+          pip-audit -r app/auth/requirements.txt    --desc --format columns || true
+          echo "=== book/requirements.txt ==="
+          pip-audit -r app/book/requirements.txt    --desc --format columns || true
+          echo "=== borrow/requirements.txt ==="
+          pip-audit -r app/borrow/requirements.txt  --desc --format columns || true
+          echo "=== worker/requirements.txt ==="
+          pip-audit -r app/worker/requirements.txt  --desc --format columns || true
+        continue-on-error: true
 
       # Runs after deps are installed so the scanner has full context for
       # React JSX imports and Python module resolution.
@@ -204,7 +237,7 @@ jobs:
           replacements = {
               "${APP_POD_ROLE_ARN}": f"arn:aws:iam::{aws_account_id}:role/digital-library-prod-app-pod-role",
               "${CLOUDWATCH_AGENT_ROLE_ARN}": f"arn:aws:iam::{aws_account_id}:role/digital-library-prod-cloudwatch-agent-role",
-              "${ALB_SECURITY_GROUP_ID}": os.environ.get('ALB_SECURITY_GROUP_ID', 'sg-02591f5bac92ce376'),
+              "${ALB_SECURITY_GROUP_ID}": os.environ.get('ALB_SECURITY_GROUP_ID', ''),
               "${K8S_NAMESPACE}": namespace,
           }
 
@@ -274,12 +307,14 @@ jobs:
               -n ${{ secrets.K8S_NAMESPACE }} --timeout=180s
           done
 
-      - name: Smoke test health endpoints
+      - name: Smoke test and capture ALB DNS
+        id: smoke
         run: |
           ALB_DNS=$(kubectl get ingress library-ingress \
             -n ${{ secrets.K8S_NAMESPACE }} \
             -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
           echo "ALB DNS: $ALB_DNS"
+          echo "alb_dns=$ALB_DNS" >> $GITHUB_OUTPUT
           for i in 1 2 3 4 5; do
             curl -sf http://$ALB_DNS/auth/health   && \
             curl -sf http://$ALB_DNS/books/health  && \
@@ -288,6 +323,19 @@ jobs:
             echo "Not ready yet, waiting 15s..."
             sleep 15
           done
+
+      # ── DAST — OWASP ZAP Baseline Scan ───────────────────────────────────
+      # Passive scan only — crawls the app and checks for missing security
+      # headers, information leaks, and common misconfigurations.
+      # Does NOT send attack payloads — safe against a live environment.
+      # continue-on-error: true so findings are visible in the job summary
+      # without blocking the deployment that already succeeded above.
+      - name: OWASP ZAP — DAST baseline scan
+        uses: zaproxy/action-baseline@v0.14.0
+        continue-on-error: true
+        with:
+          target: "http://${{ steps.smoke.outputs.alb_dns }}"
+          cmd_options: "-I"
 
       - name: Notify SNS — success
         if: success()

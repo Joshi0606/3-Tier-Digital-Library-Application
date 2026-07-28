@@ -6,7 +6,7 @@ metadata:
   annotations:
     # IRSA annotation: this service account assumes the IAM role created by Terraform.
     # Value from: terraform output alb_controller_role_arn
-    eks.amazonaws.com/role-arn: arn:aws:iam::393323650493:role/digital-library-prod-alb-controller-role
+    eks.amazonaws.com/role-arn: arn:aws:iam::519111080498:role/digital-library-prod-alb-controller-role
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -72,7 +72,7 @@ spec:
             - --ingress-class=alb
             - --aws-region=us-east-1
             # VPC ID — get after terraform apply: terraform output vpc_id
-            - --aws-vpc-id=vpc-0ee24186af048fb37
+            - --aws-vpc-id=REPLACE_AFTER_TERRAFORM_APPLY
           env:
             - name: AWS_REGION
               value: us-east-1

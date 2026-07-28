@@ -127,7 +127,7 @@ metadata:
   name: fluent-bit
   namespace: amazon-cloudwatch
   annotations:
-    eks.amazonaws.com/role-arn: "arn:aws:iam::393323650493:role/digital-library-prod-cloudwatch-agent-role"
+    eks.amazonaws.com/role-arn: "${CLOUDWATCH_AGENT_ROLE_ARN}"
 
 ---
 # ── ClusterRole: Fluent Bit ──────────────────────────────────
