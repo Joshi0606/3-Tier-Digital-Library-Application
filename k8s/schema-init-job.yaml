@@ -1,0 +1,47 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: schema-init
+  namespace: library
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: library-sa
+      containers:
+        - name: schema-init
+          image: python:3.11-slim
+          command: ["python3", "-c"]
+          args:
+            - |
+              import subprocess, sys
+              subprocess.check_call([sys.executable, "-m", "pip", "install", "boto3", "mysql-connector-python", "-q"])
+              import boto3, json, mysql.connector
+              region = "us-east-1"
+              ssm = boto3.client("ssm", region_name=region)
+              resp = ssm.get_parameters_by_path(Path="/digital-library/prod/config", Recursive=True, WithDecryption=True)
+              cfg = {p["Name"].split("/")[-1]: p["Value"] for p in resp["Parameters"]}
+              sm = boto3.client("secretsmanager", region_name=region)
+              secret = json.loads(sm.get_secret_value(SecretId=cfg["rds_secret_arn"])["SecretString"])
+              host = cfg["rds_endpoint"].split(":")[0]
+              conn = mysql.connector.connect(host=host, user=cfg["rds_db_user"], password=secret["password"])
+              cursor = conn.cursor()
+              cursor.execute("CREATE DATABASE IF NOT EXISTS digitallibrary")
+              cursor.execute("USE digitallibrary")
+              cursor.execute("CREATE TABLE IF NOT EXISTS users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL, email VARCHAR(255) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+              cursor.execute("CREATE TABLE IF NOT EXISTS books (id INT AUTO_INCREMENT PRIMARY KEY, title VARCHAR(200) NOT NULL, author VARCHAR(100) NOT NULL)")
+              cursor.execute("CREATE TABLE IF NOT EXISTS borrow_records (id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, book_id INT NOT NULL, borrow_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY unique_borrow (user_id, book_id), FOREIGN KEY (user_id) REFERENCES users(id), FOREIGN KEY (book_id) REFERENCES books(id))")
+              books = [("The Pragmatic Programmer","David Thomas"),("Clean Code","Robert C. Martin"),("Designing Data-Intensive Applications","Martin Kleppmann"),("The Phoenix Project","Gene Kim"),("Kubernetes in Action","Marko Luksa")]
+              cursor.executemany("INSERT IGNORE INTO books (title, author) VALUES (%s, %s)", books)
+              conn.commit()
+              cursor.execute("SHOW TABLES")
+              print("Tables:", [t[0] for t in cursor.fetchall()])
+              cursor.execute("SELECT COUNT(*) FROM books")
+              print("Books seeded:", cursor.fetchone()[0])
+              cursor.close()
+              conn.close()
+              print("Schema init complete!")
+          envFrom:
+            - configMapRef:
+                name: library-config
