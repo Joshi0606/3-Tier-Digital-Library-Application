@@ -118,7 +118,7 @@ resource "aws_route_table_association" "private" {
 
 resource "aws_security_group" "alb" {
   name_prefix = "${var.project_name}-${var.environment}-alb-"
-  description = "ALB — HTTP from internet"
+  description = "ALB - HTTP from internet"
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -146,7 +146,7 @@ resource "aws_security_group" "alb" {
 
 resource "aws_security_group" "eks_nodes" {
   name_prefix = "${var.project_name}-${var.environment}-eks-nodes-"
-  description = "EKS nodes — ALB to pods, node-to-node"
+  description = "EKS nodes - ALB to pods, node-to-node"
   vpc_id      = aws_vpc.main.id
 
   dynamic "ingress" {
@@ -191,7 +191,7 @@ resource "aws_security_group" "eks_nodes" {
 
 resource "aws_security_group" "rds" {
   name_prefix = "${var.project_name}-${var.environment}-rds-"
-  description = "RDS — MySQL from EKS nodes only"
+  description = "RDS - MySQL from EKS nodes only"
   vpc_id      = aws_vpc.main.id
 
   ingress {
