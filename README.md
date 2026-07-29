@@ -1,294 +1,242 @@
-# Digital Library — Cloud Native Application on AWS EKS
+# 3-Tier Digital Library — AWS EKS DevSecOps
 
-A production-grade, three-tier digital library application deployed on AWS EKS using Terraform, Kubernetes, and GitHub Actions.
-
-![Architecture Diagram](architecture_v2.png)
+A cloud-native digital library with full CI/CD, security scanning, and async event processing on AWS.
 
 ---
 
-## Tech Stack
+## Stack
 
-| Layer | Technology |
+| Layer | Tool |
 |---|---|
-| Infrastructure | Terraform, AWS (EKS, RDS, S3, SQS, SNS, ECR, CloudWatch) |
-| Container Orchestration | Kubernetes (EKS 1.31) |
-| Backend | Python Flask (microservices) |
-| Frontend | React + Vite, served via Nginx |
+| Frontend | React 18 + Vite + Nginx |
+| Backend | Python Flask (3 microservices + 1 worker) |
+| Database | Amazon RDS MySQL 8.0 |
+| Orchestration | Amazon EKS (Kubernetes 1.31) |
+| Container Registry | Amazon ECR |
+| Message Queue | Amazon SQS |
+| Notifications | Amazon SNS |
+| Infrastructure | Terraform (13 modules) |
 | CI/CD | GitHub Actions |
-| Secrets | AWS Secrets Manager + SSM Parameter Store via IRSA |
+| SAST | SonarQube (self-hosted EC2) |
+| SCA | pip-audit + Trivy |
+| Secret Scanning | Gitleaks |
+| DAST | OWASP ZAP |
+| Observability | CloudWatch Logs + Metrics + Alarms |
 
 ---
 
-## Architecture
+## Components
 
-```
-Internet → ALB → EKS (private subnets)
-                  ├── auth-service     :5001
-                  ├── book-service     :5002
-                  ├── borrow-service   :5003
-                  ├── frontend         :80
-                  └── worker (SQS consumer)
-                           ↓
-                    RDS MySQL (private)
-                    SQS → SNS → Email alerts
-```
-
-**Services**
-- `auth` — user signup and login
-- `book` — book catalogue, add books, bulk CSV import via SQS
-- `borrow` — borrow records, triggers async email via SQS
-- `worker` — polls SQS, sends SNS emails for borrow confirmations and new books
-- `frontend` — React SPA, Nginx proxies API calls to backend services
+### GitHub
+Hosts source code and triggers automation. Push to `app/**` or `k8s/**` triggers the CI/CD pipeline. Push to `**/*.tf` triggers the infrastructure pipeline.
 
 ---
 
-## Infrastructure
+### GitHub Actions
+Two workflows:
+- **`infrastructure.yml`** — runs Terraform plan/apply, installs ALB Controller and metrics-server via Helm
+- **`ci-cd.yml`** — runs security scans → builds Docker images → deploys to EKS
 
-All infrastructure is managed by Terraform with remote state in S3.
-
-| Resource | Purpose |
-|---|---|
-| VPC | 2 public + 2 private subnets across 2 AZs, NAT Gateway |
-| EKS | Kubernetes 1.31 cluster, t3.small nodes, custom launch template |
-| RDS | MySQL 8.0, private subnet, AWS-managed password rotation |
-| ECR | 5 private repos — auth, book, borrow, frontend, worker |
-| S3 | Assets bucket with versioning and encryption |
-| SQS | Orders queue + DLQ, redrive policy after 5 failures |
-| SNS | Alerts topic, multiple email subscriptions |
-| Secrets Manager | RDS master password, JWT signing key |
-| SSM | Non-sensitive config (DB host, queue URL, SNS ARN, etc.) |
-| CloudWatch | Log groups per service, 4 alarms, dashboard |
-| IAM / IRSA | Least-privilege roles per workload, no static keys in pods |
+Connects to: AWS (via IAM credentials), ECR, EKS, SonarQube, SNS, S3
 
 ---
 
-## Prerequisites
+### Terraform
+Provisions all AWS infrastructure as code. State stored in S3 with file-based locking. 13 modules across 4 dependency tiers.
 
-- Terraform >= 1.10
-- AWS CLI configured
-- kubectl
-- Helm 3
-- Docker
+Connects to: Every AWS resource in this project
 
 ---
 
-## Provisioning Infrastructure
+### VPC
+`10.0.0.0/16`. Two public subnets (ALB, SonarQube, NAT GW) and two private subnets (EKS nodes, RDS) across us-east-1a and us-east-1b.
 
-```bash
-cd terraform
-
-# Init and apply
-terraform init
-terraform apply
-
-# Install ALB Controller after apply
-helm repo add eks https://aws.github.io/eks-charts && helm repo update
-VPC_ID=$(terraform output -raw vpc_id)
-ALB_ROLE=$(terraform output -raw alb_controller_role_arn)
-
-helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
-  -n kube-system \
-  --set clusterName=digital-library-prod-eks \
-  --set region=us-east-1 \
-  --set vpcId=$VPC_ID \
-  --set "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=$ALB_ROLE"
-```
+Connects to: EKS, RDS, ALB, SonarQube, NAT Gateway
 
 ---
 
-## Deploying the Application
+### Security Groups
+Three layered groups: ALB SG → EKS Nodes SG → RDS SG. Each only allows traffic from the layer above it. RDS only accepts MySQL on port 3306 from EKS nodes.
 
-**1. Configure kubectl**
-```bash
-aws eks update-kubeconfig --name digital-library-prod-eks --region us-east-1
-```
-
-**2. Build and push images**
-```bash
-aws ecr get-login-password --region us-east-1 | \
-  docker login --username AWS --password-stdin 393323650493.dkr.ecr.us-east-1.amazonaws.com
-
-# Repeat for each service: auth, book, borrow, frontend, worker
-docker build -t digital-library-auth ./app/auth
-docker tag digital-library-auth:latest 393323650493.dkr.ecr.us-east-1.amazonaws.com/digital-library-auth:latest
-docker push 393323650493.dkr.ecr.us-east-1.amazonaws.com/digital-library-auth:latest
-```
-
-**3. Apply manifests**
-```bash
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/serviceaccount.yaml
-kubectl apply -f k8s/configmap.yaml
-kubectl apply -f k8s/auth-deployment.yaml
-kubectl apply -f k8s/book-deployment.yaml
-kubectl apply -f k8s/borrow-deployment.yaml
-kubectl apply -f k8s/frontend-deployment.yaml
-kubectl apply -f k8s/worker-deployment.yaml
-kubectl apply -f k8s/ingress.yaml
-kubectl apply -f k8s/hpa.yaml
-kubectl apply -f k8s/cloudwatch-daemonset-observability.yaml
-```
-
-**4. Run DB schema**
-```bash
-kubectl run mysql-client --image=mysql:8.0 --restart=Never -n library -- sleep 3600
-kubectl exec -it mysql-client -n library -- mysql \
-  -h <rds-endpoint> -u admin -p digitallibrary < app/database/schema.sql
-kubectl delete pod mysql-client -n library
-```
-
-**5. Get the ALB DNS**
-```bash
-kubectl get ingress library-ingress -n library
-```
+Connects to: ALB, EKS nodes, RDS
 
 ---
 
-## CI/CD Pipelines
+### Internet Gateway + NAT Gateway
+IGW gives public subnets internet access. NAT GW lets private subnet resources (EKS nodes) reach the internet outbound (for ECR pulls, AWS API calls) without being reachable inbound.
 
-Two GitHub Actions workflows handle everything automatically.
-
-### infrastructure.yml
-
-Triggers on changes to `*.tf` files.
-
-- **PR** → runs `terraform plan`, posts output as PR comment
-- **Push to main** → runs `terraform apply`, installs ALB Controller via Helm
-
-Requires: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` in GitHub Secrets.
-
-### ci-cd.yml
-
-Triggers on changes to `app/**` or `k8s/**`.
-
-- Builds all 5 Docker images in parallel
-- Runs Trivy security scan on each image
-- Deploys to EKS, waits for rollout
-- Smoke tests all health endpoints
-- Sends SNS notification on success or failure
-
-Requires: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` in GitHub Secrets.
+Connects to: Public subnets, private route tables
 
 ---
 
-## Secrets and Config
+### Amazon EKS
+Managed Kubernetes control plane. Two t3.small worker nodes in private subnets. Runs all application containers. Uses EKS Access Entries for IAM authentication (not legacy aws-auth).
 
-No secrets are stored in the Docker images or Kubernetes manifests.
-
-- **DB password** → fetched from Secrets Manager at pod startup via IRSA
-- **All other config** → fetched from SSM Parameter Store at pod startup
-- **IRSA** — each pod role is scoped to exactly the AWS resources it needs
-
-Local development falls back to environment variables (`docker-compose.yml`).
+Connects to: VPC, IAM roles, ECR (image pulls), RDS, SQS, SSM, Secrets Manager
 
 ---
 
-## Local Development
+### Kubernetes
+Application workloads as Deployments in the `library` namespace. Each service has a ClusterIP Service. Ingress resource triggers ALB creation. HPA scales auth/book/borrow pods on CPU.
 
-```bash
-cd app
-docker compose up --build
+Connects to: EKS, ALB Controller, CloudWatch (via DaemonSets)
+
+---
+
+### IRSA (IAM Roles for Service Accounts)
+Pods get temporary AWS credentials via OIDC token exchange — no static keys anywhere. EKS injects a JWT into each pod. The AWS SDK exchanges it with STS for scoped credentials.
+
+Three roles: `app-pod-role`, `alb-controller-role`, `cloudwatch-agent-role`
+
+Connects to: EKS OIDC provider, IAM, STS, S3, SQS, Secrets Manager, SSM, SNS
+
+---
+
+### AWS Load Balancer Controller
+Runs in `kube-system`. Watches Kubernetes Ingress resources and creates/manages the AWS ALB. Uses IP target mode — routes directly to pod IPs, no NodePort.
+
+Connects to: EKS, ALB, IRSA (alb-controller-role)
+
+---
+
+### ALB (Application Load Balancer)
+Internet-facing. Created by the ALB Controller from `k8s/ingress.yaml`. Routes by path:
+- `/auth` → auth-service:5001
+- `/books` → book-service:5002
+- `/borrow` → borrow-service:5003
+- `/` → frontend-service:80
+
+Connects to: Internet, EKS pods, Security Group
+
+---
+
+### Amazon ECR
+Private container registry. One repo per service (auth, book, borrow, frontend, worker). Lifecycle policy auto-deletes untagged images older than 14 days.
+
+Connects to: GitHub Actions (push), EKS nodes (pull)
+
+---
+
+### Docker
+Each service has its own Dockerfile. Built with Docker Buildx. Two tags pushed: `:latest` and `:<git-sha>`. The SHA tag pins each deployment to an exact commit.
+
+Connects to: GitHub Actions, ECR
+
+---
+
+### Amazon RDS
+MySQL 8.0, db.t3.micro, private subnets, encrypted at rest. Password managed entirely by AWS (`manage_master_user_password`) — never in Terraform state or code.
+
+Connects to: EKS pods (via Secrets Manager password + SSM endpoint), Security Group
+
+---
+
+### AWS SSM Parameter Store
+Stores non-secret config: DB endpoint, DB name, DB user, SQS queue URL, SNS topic ARN, S3 bucket name, region. Pods fetch these at startup via IRSA.
+
+Connects to: Terraform (writes), all app pods (reads via IRSA)
+
+---
+
+### AWS Secrets Manager
+Stores secrets: JWT signing key (generated by Terraform), RDS master password (managed by AWS). Pods fetch via IRSA — never hardcoded.
+
+Connects to: Terraform (JWT key), RDS (password), app pods (reads via IRSA)
+
+---
+
+### Amazon SQS
+Standard Queue for async event processing. Three event types: `borrow_confirmation`, `new_book_added`, `bulk_book_import`. DLQ captures messages that fail 3 times. CloudWatch alarm fires on any DLQ message.
+
+Connects to: borrow-service (producer), book-service (producer), worker pod (consumer), CloudWatch (DLQ alarm)
+
+---
+
+### Worker Service
+Python pod that long-polls SQS (`WaitTimeSeconds=20`). Routes messages by `event_type` to handlers. Deletes messages only after successful processing. On failure: leaves message for SQS retry. After 3 failures: message goes to DLQ.
+
+Connects to: SQS, SNS, RDS
+
+---
+
+### Amazon SNS
+Single alerts topic used for: infrastructure alarms, deployment notifications, borrow confirmation emails, new book broadcasts, OWASP ZAP scan summaries.
+
+Connects to: CloudWatch alarms, GitHub Actions deploy job, worker pod, OWASP ZAP step
+
+---
+
+### Amazon S3
+Assets bucket (private, AES256 encrypted, versioned). Also used to store OWASP ZAP HTML reports per deployment.
+
+Connects to: app pods (assets via IRSA), GitHub Actions (ZAP report upload)
+
+---
+
+### CloudWatch
+Pre-created log groups per service with retention. Four alarms: EKS CPU, RDS CPU, RDS storage, SQS DLQ depth. Custom dashboard with metrics + live log query. Fluent Bit DaemonSet ships logs. CloudWatch Agent DaemonSet ships metrics.
+
+Connects to: SNS (alarm actions), EKS nodes, RDS, SQS
+
+---
+
+### SonarQube (SAST)
+Self-hosted on EC2 t3.small (Amazon Linux 2023) in public subnet. Scans Python and JSX code for bugs, vulnerabilities, and code smells. Quality gate blocks the pipeline if thresholds aren't met. `prevent_destroy = true` prevents IP change on re-apply.
+
+Connects to: GitHub Actions (scanner sends code, waits for gate result)
+
+---
+
+### Gitleaks (Secret Scanning)
+Scans full git history for accidentally committed secrets. Runs first in the test job — before any build. Blocks pipeline immediately if secrets are found.
+
+Connects to: GitHub Actions (test job, step 1)
+
+---
+
+### pip-audit (SCA)
+Scans Python `requirements.txt` files against the OSV vulnerability database. Runs after dependency install. Results are reported but non-blocking.
+
+Connects to: GitHub Actions (test job), Python requirements files
+
+---
+
+### Trivy (Container SCA)
+Scans each built Docker image for HIGH and CRITICAL CVEs after pushing to ECR. Non-blocking — findings are visible in the job summary.
+
+Connects to: GitHub Actions (build-push job), ECR
+
+---
+
+### OWASP ZAP (DAST)
+Passive baseline scan against the live ALB after deployment. Crawls the app and checks for missing security headers, information leaks, misconfigurations. Does not send attack payloads. HTML report uploaded to S3. Findings summary emailed via SNS.
+
+Connects to: ALB (scan target), S3 (report storage), SNS (email summary)
+
+---
+
+## Request Flow (Borrow a Book)
+
+```
+User → ALB → frontend (React SPA)
+User → ALB → auth-service → RDS (login)
+User → ALB → borrow-service → RDS (insert record) → SQS (confirmation message)
+Worker ← SQS → SNS → email to user
 ```
 
-| Service | URL |
-|---|---|
-| Frontend | http://localhost:3000 |
-| Auth | http://localhost:5001 |
-| Book | http://localhost:5002 |
-| Borrow | http://localhost:5003 |
-
----
-
-## Bulk Book Import via SQS
-
-Upload a CSV to populate the book catalogue. Each row is queued as a separate SQS message and processed by the worker.
-
-```bash
-curl -X POST http://<ALB_DNS>/books/import \
-  -F "file=@app/database/devops_books.csv"
-```
-
-CSV format:
-```
-title,author
-The Phoenix Project,Gene Kim
-Kubernetes in Action,Marko Luksa
-```
-
----
-
-## Monitoring
-
-**CloudWatch Dashboard** — `digital-library-prod`
-
-- EKS node CPU
-- RDS CPU and free storage
-- SQS queue depth and DLQ depth
-- All 4 alarm statuses
-
-**Alarms** (notify via SNS email):
-
-| Alarm | Threshold |
-|---|---|
-| EKS node CPU | > 80% for 10 min |
-| RDS CPU | > 80% for 10 min |
-| RDS free storage | < 5 GB |
-| SQS DLQ depth | > 0 messages |
-
-**Logs** — Fluent Bit ships all container logs to CloudWatch:
-- `/digital-library/prod/application`
-- `/digital-library/prod/worker`
-
----
-
-## Repository Structure
+## CI/CD Flow
 
 ```
-├── app/
-│   ├── auth/          Flask auth service
-│   ├── book/          Flask book service
-│   ├── borrow/        Flask borrow service
-│   ├── frontend/      React + Nginx
-│   ├── worker/        SQS consumer
-│   └── database/      Schema SQL + seed CSV
-├── k8s/               Kubernetes manifests
-├── modules/
-│   ├── vpc/           VPC, subnets, NAT, security groups
-│   ├── eks/           EKS cluster, node group, launch template
-│   ├── iam/           EKS cluster and node IAM roles
-│   ├── iam-irsa/      App pod and CloudWatch agent IRSA roles
-│   ├── alb-controller ALB Controller IRSA role and policy
-│   ├── rds/           RDS MySQL instance
-│   ├── ecr/           ECR repositories
-│   ├── s3/            Assets S3 bucket
-│   ├── sqs/           Orders queue and DLQ
-│   ├── sns/           Alerts topic and subscriptions
-│   ├── secrets/       JWT signing key in Secrets Manager
-│   ├── ssm/           Config parameters
-│   └── cloudwatch/    Log groups, alarms, dashboard
-├── .github/workflows/
-│   ├── infrastructure.yml
-│   └── ci-cd.yml
-├── backend.tf
-├── main.tf
-├── outputs.tf
-├── provider.tf
-└── variables.tf
+git push → GitHub Actions
+  test:       Gitleaks → pip-audit → SonarQube → quality gate
+  build-push: docker build → ECR push → Trivy scan  (×5 parallel)
+  deploy:     kubectl apply → rollout → smoke test → OWASP ZAP → SNS notify
 ```
 
----
+## Infrastructure Flow
 
-## Security
-
-- All pods use IRSA — no static AWS credentials anywhere
-- RDS in private subnets — no public access
-- Secrets Manager handles DB password rotation automatically
-- IMDSv2 enforced on all EKS nodes
-- ECR images scanned by Trivy on every build
-- SQS DLQ isolates failed messages for investigation
-
----
-
-## Author
-
-**Syam Joshi Kalaga**
+```
+git push *.tf → infrastructure.yml
+  terraform apply → all AWS resources
+  helm install   → ALB Controller + metrics-server
+```

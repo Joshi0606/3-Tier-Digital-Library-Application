@@ -1,8 +1,5 @@
 # main.tf (root)
-# Wires all 13 modules together. Order in this file doesn't affect
-# Terraform's actual build order (it resolves that from module.xxx.output
-# references), but it's grouped here by dependency tier for readability.
-
+# Wires all 13 modules together
 
 # TIER 1 - no dependencies on other modules
 

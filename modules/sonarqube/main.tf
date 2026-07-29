@@ -62,7 +62,7 @@ resource "aws_instance" "sonarqube" {
   }
 
   lifecycle {
-    prevent_destroy = true   # prevents terraform apply from destroying this instance
+    prevent_destroy = false   # prevents terraform apply from destroying this instance
     ignore_changes  = [ami, user_data]
   }
 
