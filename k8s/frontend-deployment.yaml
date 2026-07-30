@@ -9,7 +9,7 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app: frontend                # was missing in old manifest — caused apply failure
+      app: frontend            # was missing in old manifest — caused apply failure
   template:
     metadata:
       labels:
