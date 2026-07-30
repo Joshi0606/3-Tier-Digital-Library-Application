@@ -152,8 +152,15 @@ jobs:
 
       - name: Install / upgrade ALB Load Balancer Controller
         run: |
-          VPC_ID=$(terraform output -raw vpc_id)
-          ALB_ROLE_ARN=$(terraform output -raw alb_controller_role_arn)
+          VPC_ID=$(aws eks describe-cluster \
+            --name ${{ secrets.EKS_CLUSTER }} \
+            --query "cluster.resourcesVpcConfig.vpcId" \
+            --output text)
+
+          ALB_ROLE_ARN=$(aws iam get-role \
+            --role-name digital-library-prod-alb-controller-role \
+            --query "Role.Arn" \
+            --output text)
 
           helm repo add eks https://aws.github.io/eks-charts
           helm repo update
