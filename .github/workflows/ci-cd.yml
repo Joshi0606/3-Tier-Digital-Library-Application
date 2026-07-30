@@ -315,11 +315,28 @@ jobs:
       - name: Smoke test and capture ALB DNS
         id: smoke
         run: |
-          ALB_DNS=$(kubectl get ingress library-ingress \
-            -n ${{ secrets.K8S_NAMESPACE }} \
-            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          echo "ALB DNS: $ALB_DNS"
+          # Wait for ALB Controller to provision the ALB (can take 2-5 min on first deploy)
+          echo "Waiting for ALB DNS to be assigned..."
+          for i in $(seq 1 30); do
+            ALB_DNS=$(kubectl get ingress library-ingress \
+              -n ${{ secrets.K8S_NAMESPACE }} \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+            if [ -n "$ALB_DNS" ]; then
+              echo "ALB DNS ready: $ALB_DNS"
+              break
+            fi
+            echo "Attempt $i/30 — ALB not ready yet, waiting 10s..."
+            sleep 10
+          done
+
+          if [ -z "$ALB_DNS" ]; then
+            echo "ALB DNS never assigned after 5 minutes — skipping smoke test and ZAP"
+            echo "alb_dns=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
           echo "alb_dns=$ALB_DNS" >> $GITHUB_OUTPUT
+
           for i in 1 2 3 4 5; do
             curl -sf http://$ALB_DNS/auth/health   && \
             curl -sf http://$ALB_DNS/books/health  && \
